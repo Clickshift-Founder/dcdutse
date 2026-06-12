@@ -2,7 +2,7 @@ import { useState } from "react";
 import { CHURCH } from "../data/church.config.js";
 import { LOCATION_DATA, mergeLocations } from "../data/locations.js";
 import { PRAYER_POINTS, DEPARTMENTS } from "../data/seed.js";
-import { getDB, saveDB, queueSync, logAction } from "../lib/storage.js";
+import { getDB, saveDB, queueSync, logAction, pushPersonToCloud, supabaseEnabled } from "../lib/storage.js";
 import { assignCellLeader, findDuplicate } from "../lib/logic.js";
 import { waLink, newcomerWelcomeMsg, leaderAssignmentMsg, deptInterestMsg } from "../lib/notifications.js";
 import Logo from "../components/Logo.jsx";
@@ -60,7 +60,17 @@ export default function NewcomerPage({ refreshDB, isOnline }) {
     if (!isOnline) queueSync("newcomer", record);
     saveDB(curr);
     logAction("newcomer_registered", `${record.name} from ${record.area}, assigned to ${leader?.name}`, "newcomer-kiosk");
-    refreshDB();
+
+    // Push to cloud (Supabase) so all devices see this newcomer
+    if (supabaseEnabled) {
+      pushPersonToCloud({
+        ...record,
+        roles: ["newcomer"],
+        assignedLeaderId: leader?.id || null,
+      }).then(() => refreshDB());
+    } else {
+      refreshDB();
+    }
 
     // Build notification links (zero-cost mode — leader/HOD taps to send)
     const interestedDepts = (form.departments || []).map((id) => DEPARTMENTS.find((d) => d.id === id)).filter(Boolean);

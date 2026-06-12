@@ -14,6 +14,10 @@ export const CHURCH = {
   pastorWife: "Pastor Mrs. Chioma Nzewigbo",
   logo: "/church-logo.png", // drop your logo image here in /public
 
+  // The live app URL — used in WhatsApp messages so leaders can tap to log in.
+  // Update this to your real domain once you have one (e.g. https://connect.dcdutse.org)
+  appUrl: "https://dcdutse.vercel.app",
+
   // Service schedule (shown to newcomers & in WhatsApp welcome)
   services: [
     { name: "Midweek Service", day: "Wednesday", time: "6:00 PM" },

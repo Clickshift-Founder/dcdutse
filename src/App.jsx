@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { CHURCH } from "./data/church.config.js";
-import { initDB, getDB, flushSyncQueue } from "./lib/storage.js";
+import { initDB, getDB, flushSyncQueue, pullFromCloud, supabaseEnabled } from "./lib/storage.js";
 import { seedDummyData } from "./lib/seedData.js";
 import NewcomerPage from "./pages/NewcomerPage.jsx";
 import CellLeaderPage from "./pages/CellLeaderPage.jsx";
@@ -12,9 +12,18 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [db, setDB] = useState(() => {
     initDB();
-    return seedDummyData();
+    // Only seed dummy data when NOT using the cloud (cloud is the source of truth)
+    return supabaseEnabled ? getDB() : seedDummyData();
   });
   const [auth, setAuth] = useState({ cellLeader: null, admin: false });
+  const [loading, setLoading] = useState(supabaseEnabled);
+
+  useEffect(() => {
+    // On startup, if Supabase is configured, pull the shared data
+    if (supabaseEnabled) {
+      pullFromCloud().then((fresh) => { setDB({ ...fresh }); setLoading(false); });
+    }
+  }, []);
 
   useEffect(() => {
     const goOnline = async () => {
@@ -31,13 +40,29 @@ export default function App() {
     };
   }, []);
 
-  const refreshDB = () => setDB({ ...getDB() });
+  const refreshDB = () => {
+    if (supabaseEnabled) {
+      pullFromCloud().then((fresh) => setDB({ ...fresh }));
+    } else {
+      setDB({ ...getDB() });
+    }
+  };
 
   const tabs = [
     { id: "newcomer", label: "🙏 Welcome" },
     { id: "celleader", label: "👥 Cell Leader" },
     { id: "admin", label: "⚙️ Admin" },
   ];
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16 }}>
+        <div style={{ width: 60, height: 60, borderRadius: 16, overflow: "hidden", boxShadow: "var(--shadow-md)" }}><Logo size={60} /></div>
+        <div style={{ fontFamily: "'Cinzel', serif", color: "var(--navy)", fontSize: 16 }}>Loading {CHURCH.name} {CHURCH.branch}…</div>
+        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Connecting to cloud database</div>
+      </div>
+    );
+  }
 
   return (
     <div>

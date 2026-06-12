@@ -75,6 +75,30 @@ export function birthdayMsg(nc) {
   return fill(CHURCH.messages.birthdayReminder, { name: nc.name });
 }
 
+// Build a full digest message to a cell leader: greets them, lists every
+// newcomer assigned to them (name + phone), and reminds them how to log in.
+// `loginUrl` is the live app link (e.g. https://dcdutse.vercel.app).
+export function leaderDigestMsg(leader, assignedList, loginUrl) {
+  const firstName = (leader.name || "").split(" ").slice(0, 2).join(" ");
+  const pin = (leader.phone || "").slice(-4);
+  const lines = assignedList.map((n, i) => {
+    const area = n.area ? `, ${n.area}${n.sublocation ? ` (${n.sublocation})` : ""}` : "";
+    return `${i + 1}. ${n.name} — ${n.phone}${area}`;
+  });
+  const body = lines.length
+    ? lines.join("\n")
+    : "(No one is currently assigned to you.)";
+  return (
+    `🙏 Hello ${firstName}! Grace and peace.\n\n` +
+    `You have ${assignedList.length} ${assignedList.length === 1 ? "soul" : "souls"} assigned to your cell for follow-up:\n\n` +
+    `${body}\n\n` +
+    `Please reach out to welcome them and invite them to your HomeCell. ` +
+    `Kindly log in to update their attendance and follow-up status here:\n${loginUrl}\n\n` +
+    `Your login: phone number ${leader.phone}, PIN ${pin} (the last 4 digits of your phone). ` +
+    `God bless you for your labour of love! ✝️`
+  );
+}
+
 // ---- Automated send (only if backend configured) ----
 
 export async function sendAutomated(to, message, channel = "whatsapp") {
@@ -90,4 +114,35 @@ export async function sendAutomated(to, message, channel = "whatsapp") {
   } catch (e) {
     return { ok: false, reason: "offline", fallback: waLink(to, message) };
   }
+}
+
+// Personalize a broadcast template per recipient.
+// Supports {firstName}, {name}, {church}, {branch}, {leaderName}.
+export function personalize(template, person, leader) {
+  return template
+    .replace(/\{firstName\}/g, (person.name || "").split(" ")[0])
+    .replace(/\{name\}/g, person.name || "")
+    .replace(/\{church\}/g, CHURCH.name)
+    .replace(/\{branch\}/g, CHURCH.branch)
+    .replace(/\{leaderName\}/g, leader?.name || "your cell leader")
+    .replace(/\{area\}/g, person.area || "");
+}
+
+// Personalized birthday message (auto-sent or tap-to-send)
+export function personalizedBirthdayMsg(person) {
+  const first = (person.name || "").split(" ")[0];
+  return (
+    `🎂🎉 Happy Birthday, ${first}! 🎉🎂\n\n` +
+    `On behalf of the entire ${CHURCH.name} ${CHURCH.branch} family, ` +
+    `we celebrate the gift of your life today. May this new year of your life ` +
+    `overflow with God's favour, divine health, and breakthrough. ` +
+    `You are deeply loved and valued here.\n\n` +
+    `We look forward to celebrating with you! God bless you richly. ✝️\n\n` +
+    `— ${CHURCH.leadPastor} & the entire ${CHURCH.name} family`
+  );
+}
+
+// Build a mailto: link (works with any email client, zero cost / no API)
+export function mailtoLink(email, subject, body) {
+  return `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }

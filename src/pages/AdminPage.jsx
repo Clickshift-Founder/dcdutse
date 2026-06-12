@@ -1,10 +1,10 @@
 import { useState, useRef } from "react";
 import { CHURCH, ADMIN_PIN } from "../data/church.config.js";
-import { LOCATION_DATA } from "../data/locations.js";
+import { LOCATION_DATA, mergeLocations } from "../data/locations.js";
 import { DEPARTMENTS } from "../data/seed.js";
-import { getDB, saveDB, logAction, exportDB, importDB, resetDB } from "../lib/storage.js";
+import { getDB, saveDB, logAction, exportDB, importDB, resetDB, pushPersonToCloud, updatePersonInCloud, deletePersonFromCloud, supabaseEnabled } from "../lib/storage.js";
 import { generateInsights, assignCellLeader, followupOverdue, upcomingBirthdays, toCSV, downloadFile } from "../lib/logic.js";
-import { waLink, birthdayMsg } from "../lib/notifications.js";
+import { waLink, smsLink, birthdayMsg, leaderDigestMsg, leaderAssignmentMsg, personalize, personalizedBirthdayMsg, mailtoLink, sendAutomated } from "../lib/notifications.js";
 
 export default function AdminPage({ db, refreshDB, auth, setAuth }) {
   const [login, setLogin] = useState("");
@@ -44,21 +44,30 @@ export default function AdminPage({ db, refreshDB, auth, setAuth }) {
   const updateStatus = (id, status) => {
     const curr = getDB();
     const n = curr.newcomers.find((x) => x.id === id);
-    if (n) { n.status = status; saveDB(curr); logAction("status_changed", `${n.name} → ${status}`, "admin"); refreshDB(); }
+    if (n) {
+      n.status = status; saveDB(curr); logAction("status_changed", `${n.name} → ${status}`, "admin");
+      if (supabaseEnabled) updatePersonInCloud(id, { ...n, status });
+      refreshDB();
+    }
   };
   const assignDept = (id, deptId) => {
     const curr = getDB();
     const n = curr.newcomers.find((x) => x.id === id);
     if (n) {
       n.departments = deptId ? [deptId] : [];
-      saveDB(curr); logAction("dept_assigned", `${n.name} → ${deptId || "none"}`, "admin"); refreshDB();
+      n.deptAssigned = deptId || null;
+      saveDB(curr); logAction("dept_assigned", `${n.name} → ${deptId || "none"}`, "admin");
+      if (supabaseEnabled) updatePersonInCloud(id, { ...n });
+      refreshDB();
     }
   };
   const deleteNC = (id) => {
     if (!confirm("Delete this record permanently?")) return;
     const curr = getDB();
     curr.newcomers = curr.newcomers.filter((n) => n.id !== id);
-    saveDB(curr); logAction("record_deleted", id, "admin"); refreshDB();
+    saveDB(curr); logAction("record_deleted", id, "admin");
+    if (supabaseEnabled) deletePersonFromCloud(id);
+    refreshDB();
   };
 
   const exportCSV = () => {
@@ -79,10 +88,12 @@ export default function AdminPage({ db, refreshDB, auth, setAuth }) {
   };
 
   const adminTabs = [
-    ["dashboard", "📊 Dashboard"], ["report", "📈 Monthly Report"], ["newcomers", "👥 All Records"],
-    ["directory", "📖 Directory"], ["people", "➕ Add People"], ["members", "🏅 Members"],
-    ["pending", "🌱 Not Yet Members"], ["flagged", "🚩 Flagged"], ["birthdays", "🎂 Birthdays"],
-    ["leaders", "🧑‍💼 Cell Leaders"], ["locations", "📍 Locations"], ["audit", "📜 Audit Log"], ["settings", "⚙️ Settings"],
+    ["dashboard", "📊 Dashboard"], ["report", "📈 Monthly Report"], ["cellperf", "🎯 Cell Performance"],
+    ["newcomers", "👥 All Records"], ["assignments", "🔗 Assignments"], ["broadcast", "📢 Broadcast"],
+    ["deptoversight", "🏛 Dept Oversight"], ["directory", "📖 Directory"], ["people", "➕ Add People"],
+    ["members", "🏅 Members"], ["pending", "🌱 Not Yet Members"], ["flagged", "🚩 Flagged"],
+    ["birthdays", "🎂 Birthdays"], ["leaders", "🧑‍💼 Cell Leaders"], ["locations", "📍 Locations"],
+    ["audit", "📜 Audit Log"], ["settings", "⚙️ Settings"],
   ];
 
   return (
@@ -106,10 +117,14 @@ export default function AdminPage({ db, refreshDB, auth, setAuth }) {
 
       {tab === "dashboard" && <Dashboard insights={insights} newcomers={newcomers} leaders={db.cellLeaders || []} />}
       {tab === "report" && <MonthlyReport insights={insights} onExport={exportCSV} />}
+      {tab === "cellperf" && <CellPerformance db={db} newcomers={newcomers} />}
       {tab === "newcomers" && <AllRecords newcomers={newcomers} onStatus={updateStatus} onDept={assignDept} onDelete={deleteNC} />}
+      {tab === "assignments" && <Assignments db={db} newcomers={newcomers} refreshDB={refreshDB} />}
+      {tab === "broadcast" && <Broadcast db={db} newcomers={newcomers} />}
+      {tab === "deptoversight" && <DeptOversight db={db} newcomers={newcomers} onAssignHead={assignDept} />}
       {tab === "directory" && <Directory db={db} newcomers={newcomers} refreshDB={refreshDB} />}
       {tab === "people" && <AddPeople db={db} refreshDB={refreshDB} />}
-      {tab === "members" && <Members members={members} />}
+      {tab === "members" && <Members members={members} leadership={db.leadership || []} onAssignDept={assignDept} />}
       {tab === "pending" && <NotYetMembers newcomers={newcomers} />}
       {tab === "flagged" && <Flagged newcomers={newcomers} />}
       {tab === "birthdays" && <Birthdays />}
@@ -264,25 +279,139 @@ function AllRecords({ newcomers, onStatus, onDept, onDelete }) {
   );
 }
 
-function Members({ members }) {
-  const noDept = members.filter((n) => !n.departments?.length);
+// ---- Assignments: manually assign unassigned newcomers + message leaders ----
+function Assignments({ db, newcomers, refreshDB }) {
+  const [view, setView] = useState("unassigned");
+  const leaders = db.cellLeaders || [];
+
+  const unassigned = newcomers.filter((n) => !n.assignedLeader);
+
+  const assignTo = (ncId, leaderId) => {
+    if (!leaderId) return;
+    const leader = leaders.find((l) => l.id === leaderId);
+    const curr = getDB();
+    const nc = curr.newcomers.find((n) => n.id === ncId);
+    if (nc && leader) {
+      nc.assignedLeader = leader;
+      saveDB(curr);
+      logAction("manual_assign", `${nc.name} → ${leader.name}`, "admin");
+      if (supabaseEnabled) updatePersonInCloud(ncId, { ...nc, assignedLeaderId: leader.id });
+      refreshDB();
+    }
+  };
+
+  // Suggest the geographically closest leader for an unassigned newcomer
+  const suggestLeader = (nc) => {
+    const sub = (nc.sublocation || "").toLowerCase();
+    const area = (nc.area || "").toLowerCase();
+    let s = leaders.find((l) => l.areas?.some((a) => a.toLowerCase() === sub));
+    if (!s) s = leaders.find((l) => l.areas?.some((a) => a.toLowerCase() === area));
+    return s || null;
+  };
+
   return (
     <>
-      {noDept.length > 0 && <div className="notice notice-warn">⚠️ {noDept.length} members have not joined a department. They need {CHURCH.foundationClass} before functioning.</div>}
-      {members.map((nc) => (
-        <div key={nc.id} className="newcomer-row">
-          <div style={{ flex: 1 }}>
-            <div className="newcomer-name">{nc.name} {nc.whatsappAdded ? "✅" : "⚠️"}</div>
-            <div className="newcomer-meta">📞 {nc.phone} · 📍 {nc.area}</div>
-            <div className="newcomer-meta">Cell: {nc.assignedLeader?.name || "—"} · Depts: {nc.departments?.length ? nc.departments.map((d) => DEPARTMENTS.find((x) => x.id === d)?.name || d).join(", ") : "None"}</div>
+      <div className="tab-bar" style={{ marginBottom: 18 }}>
+        {[["unassigned", `🔴 Unassigned (${unassigned.length})`], ["byleader", "📣 Message Leaders"]].map(([id, label]) => (
+          <button key={id} className={"tab-btn" + (view === id ? " active" : "")} onClick={() => setView(id)}>{label}</button>
+        ))}
+      </div>
+
+      {view === "unassigned" && (
+        <>
+          <div className="notice notice-warn" style={{ marginBottom: 16 }}>
+            🔗 These newcomers had no cell leader covering their exact location. Assign each to the closest leader — a suggestion is pre-selected where possible.
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-            <span className="status-pill pill-member">Member</span>
-            {!nc.whatsappAdded && <span className="status-pill pill-flagged">WhatsApp Pending</span>}
-            {!nc.departments?.length && <span className="status-pill pill-flagged">No Department</span>}
+          {unassigned.map((nc) => {
+            const suggested = suggestLeader(nc);
+            return (
+              <div key={nc.id} className="newcomer-row">
+                <div style={{ flex: 1 }}>
+                  <div className="newcomer-name">{nc.name}</div>
+                  <div className="newcomer-meta">📞 {nc.phone} · 📍 {nc.area}{nc.sublocation ? ` › ${nc.sublocation}` : ""}{nc.village ? ` › ${nc.village}` : ""}</div>
+                  {suggested && <div className="newcomer-meta" style={{ color: "var(--blue)" }}>💡 Suggested: {suggested.name} ({suggested.zone})</div>}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                  <select className="form-input form-select" style={{ fontSize: 12, padding: "7px 28px 7px 10px", width: "auto" }} defaultValue={suggested?.id || ""} id={`assign-${nc.id}`}>
+                    <option value="">— Choose leader —</option>
+                    {leaders.map((l) => <option key={l.id} value={l.id}>{l.name} · {l.zone}</option>)}
+                  </select>
+                  <button className="btn-secondary" style={{ fontSize: 12 }} onClick={() => assignTo(nc.id, document.getElementById(`assign-${nc.id}`).value)}>✓ Assign</button>
+                </div>
+              </div>
+            );
+          })}
+          {unassigned.length === 0 && <div style={{ color: "var(--text-dim)", textAlign: "center", padding: 32 }}>Everyone is assigned to a cell leader 🎉</div>}
+        </>
+      )}
+
+      {view === "byleader" && (
+        <>
+          <div className="notice" style={{ marginBottom: 16 }}>
+            📣 Tap to send each cell leader a WhatsApp message listing everyone assigned to them, with a reminder to log in at <code>{CHURCH.appUrl}</code>. Great for your weekly followup push — works now, no API needed.
           </div>
-        </div>
-      ))}
+          {leaders.map((l) => {
+            const assigned = newcomers.filter((n) => n.assignedLeader?.id === l.id);
+            const msg = leaderDigestMsg(l, assigned, CHURCH.appUrl);
+            return (
+              <div key={l.id} className="newcomer-row">
+                <div style={{ flex: 1 }}>
+                  <div className="newcomer-name">{l.name}</div>
+                  <div className="newcomer-meta">📞 {l.phone} · {l.zone || "—"}</div>
+                  <div className="newcomer-meta">{assigned.length} {assigned.length === 1 ? "soul" : "souls"} assigned{assigned.length ? `: ${assigned.slice(0, 3).map((n) => n.name.split(" ")[0]).join(", ")}${assigned.length > 3 ? "…" : ""}` : ""}</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                  <a className="btn-wa" href={waLink(l.phone, msg)} target="_blank" rel="noreferrer">💬 Send List</a>
+                  <a className="btn-wa" href={`tel:${l.phone}`} style={{ background: "var(--blue-soft)", borderColor: "#d4e2fb", color: "var(--navy)" }}>📞 Call</a>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+    </>
+  );
+}
+
+function Members({ members, leadership, onAssignDept }) {
+  const noDept = members.filter((n) => !n.deptAssigned);
+
+  // Build dept options labelled with their Head of Department name
+  const headName = (deptId) => {
+    const head = (leadership || []).find((p) => (p.roles || []).includes("deptHead") && p.deptId === deptId);
+    return head?.name || DEPARTMENTS.find((d) => d.id === deptId)?.leader || "";
+  };
+
+  return (
+    <>
+      {noDept.length > 0 && <div className="notice notice-warn">⚠️ {noDept.length} member{noDept.length > 1 ? "s have" : " has"} not been assigned to a department. Use the dropdown to assign them (their indicated interest is marked ⭐). They need {CHURCH.foundationClass} before functioning.</div>}
+      {members.map((nc) => {
+        const indicated = nc.departments || [];
+        return (
+          <div key={nc.id} className="newcomer-row">
+            <div style={{ flex: 1 }}>
+              <div className="newcomer-name">{nc.name} {nc.whatsappAdded ? "✅" : "⚠️"}</div>
+              <div className="newcomer-meta">📞 {nc.phone} · 📍 {nc.area}</div>
+              <div className="newcomer-meta">Cell: {nc.assignedLeader?.name || "—"}</div>
+              {nc.deptAssigned
+                ? <div className="newcomer-meta" style={{ color: "var(--green)" }}>✓ Serving in {DEPARTMENTS.find((d) => d.id === nc.deptAssigned)?.name} (Head: {headName(nc.deptAssigned)})</div>
+                : indicated.length
+                  ? <div className="newcomer-meta" style={{ color: "var(--gold)" }}>⭐ Indicated interest: {indicated.map((d) => DEPARTMENTS.find((x) => x.id === d)?.name).join(", ")}</div>
+                  : <div className="newcomer-meta" style={{ color: "var(--text-dim)" }}>No department indicated</div>}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+              <span className="status-pill pill-member">Member</span>
+              {!nc.whatsappAdded && <span className="status-pill pill-flagged">WhatsApp Pending</span>}
+              <select className="form-input form-select" style={{ fontSize: 11, padding: "5px 26px 5px 8px", width: "auto", maxWidth: 200 }} value={nc.deptAssigned || ""} onChange={(e) => onAssignDept(nc.id, e.target.value)}>
+                <option value="">— Assign department —</option>
+                {DEPARTMENTS.map((d) => (
+                  <option key={d.id} value={d.id}>{indicated.includes(d.id) ? "⭐ " : ""}{d.name} → {headName(d.id) || "no head"}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        );
+      })}
       {members.length === 0 && <div style={{ color: "var(--text-dim)", textAlign: "center", padding: 32 }}>No full members yet</div>}
     </>
   );
@@ -298,7 +427,7 @@ const ROLES = [
 
 // ---- Add People: register existing pastors, HODs, members (not newcomers) ----
 function AddPeople({ db, refreshDB }) {
-  const blank = { name: "", phone: "", roles: [], zone: "", deptId: "", canLogin: false };
+  const blank = { name: "", phone: "", email: "", roles: [], zone: "", deptId: "", canLogin: false };
   const [f, setF] = useState(blank);
   const [imported, setImported] = useState(null);
   const importRef = useRef();
@@ -326,37 +455,55 @@ function AddPeople({ db, refreshDB }) {
     }
     saveDB(curr);
     logAction("person_added", `${f.name} (${f.roles.join(", ") || "member"})`, "admin");
-    refreshDB();
+    // Push to cloud as a people row with the chosen roles
+    if (supabaseEnabled) {
+      pushPersonToCloud({
+        name: f.name, phone: f.phone, email: f.email || null,
+        roles: f.roles.length ? f.roles : ["member"],
+        status: "member", zone: f.zone, deptId: f.deptId, canLogin: f.canLogin,
+      }).then(() => refreshDB());
+    } else {
+      refreshDB();
+    }
     setF(blank);
   };
 
-  // CSV import: expects columns Name,Phone,Roles,Zone,Department
+  // CSV import: columns Name,Phone,Email,Roles,Zone,Department
   const handleCSV = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const lines = reader.result.split(/\r?\n/).filter((l) => l.trim());
       const rows = lines.slice(1); // skip header
       const curr = getDB();
       curr.leadership = curr.leadership || [];
       let count = 0;
+      const cloudInserts = [];
       rows.forEach((line) => {
         const cells = line.split(",").map((c) => c.replace(/^"|"$/g, "").trim());
-        const [name, phone, roles, zone, dept] = cells;
+        const [name, phone, email, roles, zone, dept] = cells;
         if (!name || !phone) return;
+        const roleArr = roles ? roles.split(/[;|]/).map((r) => r.trim()).filter(Boolean) : ["member"];
         curr.leadership.push({
           id: "person_" + Date.now() + "_" + count,
-          name, phone,
-          roles: roles ? roles.split(/[;|]/).map((r) => r.trim()).filter(Boolean) : ["member"],
+          name, phone, email: email || "",
+          roles: roleArr,
           zone: zone || "", deptId: dept || "",
           canLogin: false, status: "member",
           addedAt: new Date().toISOString(),
         });
+        if (supabaseEnabled) {
+          cloudInserts.push(pushPersonToCloud({
+            name, phone, email: email || null, roles: roleArr,
+            status: "member", zone: zone || "", deptId: dept || "",
+          }));
+        }
         count++;
       });
       saveDB(curr);
       logAction("csv_import", `${count} people imported`, "admin");
+      if (supabaseEnabled) { await Promise.all(cloudInserts); }
       refreshDB();
       setImported(count);
     };
@@ -375,6 +522,7 @@ function AddPeople({ db, refreshDB }) {
           <div className="form-group"><label className="form-label">Full Name *</label><input className="form-input" placeholder="Pastor / Bro / Sis ..." value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Phone *</label><input className="form-input" placeholder="0801..." value={f.phone} onChange={(e) => setF((x) => ({ ...x, phone: e.target.value }))} /></div>
         </div>
+        <div className="form-group" style={{ marginTop: 14 }}><label className="form-label">Email (optional)</label><input className="form-input" type="email" placeholder="name@email.com — for email notifications" value={f.email} onChange={(e) => setF((x) => ({ ...x, email: e.target.value }))} /></div>
 
         <div className="form-group" style={{ marginTop: 14 }}>
           <label className="form-label">Role(s) — select all that apply</label>
@@ -413,7 +561,7 @@ function AddPeople({ db, refreshDB }) {
       <div className="form-card">
         <div className="form-section-title">📥 Bulk Import (CSV)</div>
         <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12, lineHeight: 1.6 }}>
-          Upload a CSV with columns: <code>Name, Phone, Roles, Zone, Department</code>. Separate multiple roles with a semicolon (e.g. <code>cellLeader;deptHead</code>). Roles can be: member, cellLeader, zonalPastor, deptHead, pastor.
+          Upload a CSV with columns: <code>Name, Phone, Email, Roles, Zone, Department</code>. Email is optional. Separate multiple roles with a semicolon (e.g. <code>cellLeader;deptHead</code>). Roles can be: member, cellLeader, zonalPastor, deptHead, pastor.
         </p>
         <button className="btn-secondary" onClick={() => importRef.current?.click()}>📂 Choose CSV File</button>
         <input ref={importRef} type="file" accept=".csv" style={{ display: "none" }} onChange={handleCSV} />
@@ -545,7 +693,10 @@ function Flagged({ newcomers }) {
               {nc.status === "flagged" ? "🚩 Manually flagged" : followupOverdue(nc) ? `⏰ Not contacted in ${CHURCH.followupSLAHours}h+` : "Member but no department"}
             </div>
           </div>
-          <span className="status-pill pill-flagged">{nc.status === "flagged" ? "Flagged" : followupOverdue(nc) ? "Overdue" : "No Dept"}</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+            <span className="status-pill pill-flagged">{nc.status === "flagged" ? "Flagged" : followupOverdue(nc) ? "Overdue" : "No Dept"}</span>
+            <a className="btn-wa" href={`tel:${nc.phone}`} style={{ background: "var(--blue-soft)", borderColor: "#d4e2fb", color: "var(--navy)", fontSize: 11, padding: "6px 12px" }}>📞 Call</a>
+          </div>
         </div>
       ))}
       {flagged.length === 0 && <div style={{ color: "var(--text-dim)", textAlign: "center", padding: 32 }}>No flagged records 🎉</div>}
@@ -555,17 +706,39 @@ function Flagged({ newcomers }) {
 
 function Birthdays() {
   const list = upcomingBirthdays(30);
+  const todays = list.filter((n) => n.daysUntil === 0);
+  const backendOn = Boolean(import.meta.env?.VITE_API_URL);
+
+  const autoSendToday = async () => {
+    if (!todays.length) return;
+    let sent = 0;
+    for (const nc of todays) {
+      const res = await sendAutomated(nc.phone, personalizedBirthdayMsg(nc), "whatsapp");
+      if (res.ok) sent++;
+    }
+    alert(`Sent ${sent} birthday message(s).`);
+    logAction("birthday_auto", `${sent} sent`, "admin");
+  };
+
   return (
     <>
-      <div className="notice" style={{ marginBottom: 16 }}>🎂 Upcoming birthdays in the next 30 days — a call or message keeps people connected to the church family.</div>
+      <div className="notice" style={{ marginBottom: 16 }}>🎂 Upcoming birthdays in the next 30 days. Each message is personalized with the person's name and a blessing from {CHURCH.leadPastor}. {backendOn ? "Auto-send is available for today's birthdays." : "Tap to send each one (free)."}</div>
+
+      {todays.length > 0 && backendOn && (
+        <button className="btn-primary" style={{ maxWidth: 320, marginBottom: 16 }} onClick={autoSendToday}>⚡ Auto-Send {todays.length} Birthday Message{todays.length > 1 ? "s" : ""} Today</button>
+      )}
+
       {list.map((nc) => (
         <div key={nc.id} className="newcomer-row">
           <div style={{ flex: 1 }}>
-            <div className="newcomer-name">{nc.name}</div>
+            <div className="newcomer-name">{nc.name} {nc.daysUntil === 0 && <span style={{ fontSize: 11, color: "var(--gold)" }}>🎉 Today!</span>}</div>
             <div className="newcomer-meta">🎂 {nc.daysUntil === 0 ? "Today!" : `In ${nc.daysUntil} day${nc.daysUntil > 1 ? "s" : ""}`} · {nc.birthday}</div>
             <div className="newcomer-meta">📞 {nc.phone}</div>
           </div>
-          <a className="btn-wa" href={waLink(nc.phone, birthdayMsg(nc))} target="_blank" rel="noreferrer">🎉 Send Wishes</a>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+            <a className="btn-wa" href={waLink(nc.phone, personalizedBirthdayMsg(nc))} target="_blank" rel="noreferrer">🎉 Send Wishes</a>
+            <a className="btn-wa" href={`tel:${nc.phone}`} style={{ fontSize: 11, padding: "6px 12px", background: "var(--blue-soft)", borderColor: "#d4e2fb", color: "var(--navy)" }}>📞 Call</a>
+          </div>
         </div>
       ))}
       {list.length === 0 && <div style={{ color: "var(--text-dim)", textAlign: "center", padding: 32 }}>No birthdays in the next 30 days</div>}
@@ -574,41 +747,109 @@ function Birthdays() {
 }
 
 function Leaders({ db, newcomers, refreshDB }) {
-  const [f, setF] = useState({ name: "", phone: "", zone: "", areas: "", email: "" });
+  const LOC = mergeLocations(LOCATION_DATA, db.customLocations || []);
+  const [f, setF] = useState({ name: "", phone: "", zone: "", email: "" });
+  const [areas, setAreas] = useState([]); // chosen coverage: [{area, sublocation}]
+  const [pick, setPick] = useState({ area: "", sub: "" });
   const leaders = db.cellLeaders || [];
+
+  const areaList = Object.keys(LOC);
+  const subList = pick.area ? Object.keys(LOC[pick.area]?.subs || {}) : [];
+
+  const addCoverage = () => {
+    if (!pick.area) return;
+    // store the sublocation if chosen (precise), else the whole area
+    const label = pick.sub || pick.area;
+    if (areas.some((a) => a.label === label)) return;
+    setAreas([...areas, { label, area: pick.area, sublocation: pick.sub }]);
+    setPick({ area: pick.area, sub: "" }); // keep area selected for adding more subs
+  };
+  const removeCoverage = (label) => setAreas(areas.filter((a) => a.label !== label));
+
   const add = () => {
-    if (!f.name || !f.phone) return;
+    if (!f.name || !f.phone) return alert("Name and phone are required.");
+    if (areas.length === 0) return alert("Add at least one coverage location so newcomers can be auto-matched.");
     const curr = getDB();
     curr.cellLeaders = curr.cellLeaders || [];
-    curr.cellLeaders.push({ id: "cl_" + Date.now(), ...f, roles: ["cellLeader"], areas: f.areas.split(",").map((s) => s.trim()).filter(Boolean) });
-    saveDB(curr); logAction("leader_added", f.name, "admin"); refreshDB();
-    setF({ name: "", phone: "", zone: "", areas: "", email: "" });
+    const coverage = areas.map((a) => a.label);
+    curr.cellLeaders.push({
+      id: "cl_" + Date.now(),
+      name: f.name, phone: f.phone, zone: f.zone, email: f.email,
+      roles: ["cellLeader"],
+      areas: coverage, // exact strings from the same dropdowns newcomers use
+    });
+    saveDB(curr); logAction("leader_added", `${f.name} covering ${coverage.join(", ")}`, "admin");
+    if (supabaseEnabled) {
+      pushPersonToCloud({
+        name: f.name, phone: f.phone, email: f.email || null,
+        roles: ["cellLeader"], status: "member",
+        zone: f.zone, coverage, canLogin: true,
+      }).then(() => refreshDB());
+    } else {
+      refreshDB();
+    }
+    setF({ name: "", phone: "", zone: "", email: "" });
+    setAreas([]); setPick({ area: "", sub: "" });
   };
   const remove = (id) => {
     if (!confirm("Remove this cell leader?")) return;
     const curr = getDB();
     curr.cellLeaders = curr.cellLeaders.filter((l) => l.id !== id);
-    saveDB(curr); logAction("leader_removed", id, "admin"); refreshDB();
+    saveDB(curr); logAction("leader_removed", id, "admin");
+    if (supabaseEnabled) deletePersonFromCloud(id);
+    refreshDB();
   };
+
   return (
     <>
+      <div className="notice" style={{ marginBottom: 16 }}>
+        🧑‍💼 Coverage locations use the same Area → Neighbourhood list as the newcomer form, so when a newcomer picks their address, the system auto-matches them to the cell leader covering it.
+      </div>
+
       <div className="form-card">
         <div className="form-section-title">➕ Add New Cell Leader</div>
         <div className="form-grid-2">
-          <div className="form-group"><label className="form-label">Full Name</label><input className="form-input" placeholder="Bro/Sis ..." value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} /></div>
-          <div className="form-group"><label className="form-label">Phone</label><input className="form-input" placeholder="0801..." value={f.phone} onChange={(e) => setF((x) => ({ ...x, phone: e.target.value }))} /></div>
+          <div className="form-group"><label className="form-label">Full Name *</label><input className="form-input" placeholder="Bro/Sis ..." value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} /></div>
+          <div className="form-group"><label className="form-label">Phone *</label><input className="form-input" placeholder="0801..." value={f.phone} onChange={(e) => setF((x) => ({ ...x, phone: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Zone Name</label><input className="form-input" placeholder="Dutse Main Zone" value={f.zone} onChange={(e) => setF((x) => ({ ...x, zone: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Email (optional)</label><input className="form-input" placeholder="email@domain.com" value={f.email} onChange={(e) => setF((x) => ({ ...x, email: e.target.value }))} /></div>
         </div>
-        <div className="form-group" style={{ marginTop: 14 }}><label className="form-label">Covered Areas (comma-separated)</label><input className="form-input" placeholder="Dutse Alhaji, Dutse Sokale, Bamko" value={f.areas} onChange={(e) => setF((x) => ({ ...x, areas: e.target.value }))} /></div>
-        <button className="btn-primary" style={{ marginTop: 12 }} onClick={add}>➕ Add Cell Leader</button>
+
+        <div className="form-group" style={{ marginTop: 16 }}>
+          <label className="form-label">Coverage Locations (where this leader's cell members live)</label>
+          <div className="form-grid-2" style={{ marginBottom: 10 }}>
+            <select className="form-input form-select" value={pick.area} onChange={(e) => setPick({ area: e.target.value, sub: "" })}>
+              <option value="">— Select area —</option>
+              {areaList.map((a) => <option key={a} value={a}>{LOC[a].label}</option>)}
+            </select>
+            <select className="form-input form-select" value={pick.sub} onChange={(e) => setPick((p) => ({ ...p, sub: e.target.value }))} disabled={!pick.area}>
+              <option value="">{pick.area ? "— Whole area, or pick neighbourhood —" : "Select an area first"}</option>
+              {subList.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <button className="btn-secondary" onClick={addCoverage} disabled={!pick.area}>➕ Add this location</button>
+
+          {areas.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
+              {areas.map((a) => (
+                <span key={a.label} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "var(--blue-soft)", border: "1px solid #d4e2fb", borderRadius: 8, padding: "5px 10px", fontSize: 12, color: "var(--navy)" }}>
+                  {a.label}
+                  <span onClick={() => removeCoverage(a.label)} style={{ cursor: "pointer", color: "var(--text-dim)", fontWeight: 700 }}>✕</span>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <button className="btn-primary" style={{ marginTop: 16 }} onClick={add}>➕ Add Cell Leader</button>
       </div>
+
       {leaders.map((l) => (
         <div key={l.id} className="newcomer-row">
           <div style={{ flex: 1 }}>
             <div className="newcomer-name">{l.name} {l.roles?.includes("zonalPastor") && <span style={{ fontSize: 10, color: "var(--purple)" }}>· Zonal Pastor</span>}</div>
-            <div className="newcomer-meta">📞 {l.phone} · Zone: {l.zone}</div>
-            <div className="newcomer-meta">Areas: {(l.areas || []).join(", ")}</div>
+            <div className="newcomer-meta">📞 {l.phone} · Zone: {l.zone || "—"}</div>
+            <div className="newcomer-meta">Covers: {(l.areas || []).join(", ") || "⚠️ no locations set"}</div>
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Login PIN: {l.phone.slice(-4)} · {newcomers.filter((n) => n.assignedLeader?.id === l.id).length} assigned</div>
           </div>
           <button className="btn-danger" onClick={() => remove(l.id)}>Remove</button>
@@ -707,5 +948,330 @@ function Settings({ db, fileRef, onBackup, onImport, refreshDB }) {
         🖼️ <strong>Logo:</strong> Place your church logo at <code style={{ fontSize: 11 }}>public/church-logo.png</code> — it appears everywhere automatically. To rebrand for another church, edit <code style={{ fontSize: 11 }}>src/data/church.config.js</code>.
       </div>
     </div>
+  );
+}
+
+// ============================================================
+//  CELL PERFORMANCE — pastor's snapshot of every cell leader
+//  and how their assigned people are doing.
+// ============================================================
+function CellPerformance({ db, newcomers }) {
+  const [expanded, setExpanded] = useState(null);
+  const leaders = db.cellLeaders || [];
+
+  const rows = leaders.map((l) => {
+    const assigned = newcomers.filter((n) => n.assignedLeader?.id === l.id);
+    return {
+      leader: l,
+      assigned,
+      total: assigned.length,
+      pending: assigned.filter((n) => n.status === "new").length,
+      active: assigned.filter((n) => n.status === "active").length,
+      members: assigned.filter((n) => n.status === "member").length,
+      flagged: assigned.filter((n) => n.status === "flagged").length,
+      notContacted: assigned.filter((n) => !n.contactedAt).length,
+      overdue: assigned.filter((n) => followupOverdue(n)).length,
+    };
+  }).sort((a, b) => b.total - a.total);
+
+  const unassigned = newcomers.filter((n) => !n.assignedLeader);
+
+  return (
+    <>
+      <div className="notice" style={{ marginBottom: 16 }}>
+        🎯 A snapshot for the Pastor: every cell leader, how many souls they oversee, and exactly where each stands. Tap any leader to see their full list with statuses and contact buttons.
+      </div>
+
+      {unassigned.length > 0 && (
+        <div className="notice notice-warn" style={{ marginBottom: 16 }}>
+          ⚠️ {unassigned.length} newcomer{unassigned.length > 1 ? "s are" : " is"} not yet assigned to any cell leader. See the Assignments tab to assign them.
+        </div>
+      )}
+
+      {rows.map(({ leader, assigned, total, pending, active, members, flagged, notContacted, overdue }) => (
+        <div key={leader.id} style={{ marginBottom: 10 }}>
+          <div className="newcomer-row" style={{ cursor: "pointer", marginBottom: 0 }} onClick={() => setExpanded(expanded === leader.id ? null : leader.id)}>
+            <div style={{ flex: 1 }}>
+              <div className="newcomer-name">{leader.name} {overdue > 0 && <span style={{ fontSize: 11, color: "var(--red)" }}>⏰ {overdue} overdue</span>}</div>
+              <div className="newcomer-meta">📞 {leader.phone} · {leader.zone || "—"}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                <span className="status-pill" style={{ background: "var(--blue-soft)", color: "var(--navy)", border: "1px solid #d4e2fb" }}>{total} total</span>
+                {pending > 0 && <span className="status-pill pill-new">{pending} pending</span>}
+                {active > 0 && <span className="status-pill pill-active">{active} active</span>}
+                {members > 0 && <span className="status-pill pill-member">{members} members</span>}
+                {flagged > 0 && <span className="status-pill pill-flagged">{flagged} flagged</span>}
+                {notContacted > 0 && <span className="status-pill" style={{ background: "var(--red-soft)", color: "var(--red)", border: "1px solid #f4c9c9" }}>{notContacted} not contacted</span>}
+              </div>
+            </div>
+            <div style={{ fontSize: 20, color: "var(--text-dim)" }}>{expanded === leader.id ? "▾" : "▸"}</div>
+          </div>
+
+          {expanded === leader.id && (
+            <div style={{ background: "var(--blue-soft)", border: "1px solid #d4e2fb", borderTop: "none", borderRadius: "0 0 12px 12px", padding: "12px 16px" }}>
+              {assigned.length === 0 && <div style={{ fontSize: 13, color: "var(--text-muted)", padding: 8 }}>No one assigned yet.</div>}
+              {assigned.map((n) => (
+                <div key={n.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #d4e2fb" }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>{n.name}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)" }}>📞 {n.phone} · {n.attendance?.length || 0}/{CHURCH.membershipThreshold} services {!n.contactedAt && "· ⚠️ not contacted"}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span className={"status-pill " + (n.status === "new" ? "pill-new" : n.status === "member" ? "pill-member" : n.status === "flagged" ? "pill-flagged" : "pill-active")}>{n.status}</span>
+                    <a className="btn-wa" href={`tel:${n.phone}`} style={{ fontSize: 11, padding: "5px 10px", background: "#fff", borderColor: "#d4e2fb", color: "var(--navy)" }}>📞</a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+      {rows.length === 0 && <div style={{ color: "var(--text-dim)", textAlign: "center", padding: 32 }}>No cell leaders added yet.</div>}
+    </>
+  );
+}
+
+// ============================================================
+//  BROADCAST — bulk messaging to filtered audiences.
+//  Manual (tap-to-send / mailto, zero cost) + automatic
+//  (via backend if VITE_API_URL configured).
+// ============================================================
+function Broadcast({ db, newcomers }) {
+  const leaders = db.cellLeaders || [];
+  const leadership = db.leadership || [];
+  const [audience, setAudience] = useState("members");
+  const [channel, setChannel] = useState("whatsapp");
+  const [subject, setSubject] = useState("A word from Dominion City Dutse");
+  const [body, setBody] = useState("Hello {firstName}, grace and peace to you from all of us at {church} {branch}! We're thinking of you this week. 🙏");
+  const [sending, setSending] = useState(false);
+  const [sentResult, setSentResult] = useState(null);
+
+  // Build the recipient list from the chosen audience
+  const allPeople = [
+    ...newcomers,
+    ...leaders.map((l) => ({ ...l, status: "member", roles: l.roles || ["cellLeader"] })),
+    ...leadership,
+  ];
+  // De-dupe by phone
+  const seen = new Set();
+  const everyone = allPeople.filter((p) => {
+    const k = (p.phone || "").replace(/\D/g, "");
+    if (!k || seen.has(k)) return false;
+    seen.add(k); return true;
+  });
+
+  const zones = [...new Set(leaders.map((l) => l.zone).filter(Boolean))];
+
+  const recipients = (() => {
+    switch (audience) {
+      case "members": return everyone.filter((p) => p.status === "member" || (p.roles || []).includes("member"));
+      case "newcomers": return newcomers.filter((n) => (n.roles || ["newcomer"]).includes("newcomer") || n.status !== "member");
+      case "not_members": return newcomers.filter((n) => n.status !== "member");
+      case "active": return newcomers.filter((n) => n.status === "active");
+      case "flagged": return newcomers.filter((n) => n.status === "flagged" || followupOverdue(n));
+      case "leaders": return leaders;
+      case "all": return everyone;
+      default:
+        if (audience.startsWith("zone:")) {
+          const z = audience.slice(5);
+          const zoneLeaders = leaders.filter((l) => l.zone === z).map((l) => l.id);
+          return newcomers.filter((n) => zoneLeaders.includes(n.assignedLeader?.id));
+        }
+        if (audience.startsWith("dept:")) {
+          const d = audience.slice(5);
+          return newcomers.filter((n) => (n.departments || []).includes(d) || n.deptAssigned === d);
+        }
+        return [];
+    }
+  })();
+
+  const withChannel = channel === "email"
+    ? recipients.filter((r) => r.email)
+    : recipients.filter((r) => r.phone);
+
+  const sampleMsg = withChannel.length ? personalize(body, withChannel[0]) : personalize(body, { name: "John Doe" });
+
+  // Manual send: open each recipient's WhatsApp/SMS/email one at a time
+  const manualSend = () => {
+    if (!withChannel.length) return alert("No recipients match this audience/channel.");
+    setSending(true);
+    let i = 0;
+    const openNext = () => {
+      if (i >= withChannel.length) { setSending(false); setSentResult({ count: withChannel.length, mode: "manual" }); logAction("broadcast_manual", `${withChannel.length} to ${audience} via ${channel}`, "admin"); return; }
+      const r = withChannel[i];
+      const msg = personalize(body, r);
+      let url;
+      if (channel === "whatsapp") url = waLink(r.phone, msg);
+      else if (channel === "sms") url = smsLink(r.phone, msg);
+      else url = mailtoLink(r.email, subject, msg);
+      window.open(url, "_blank");
+      i++;
+      setTimeout(openNext, 600); // small gap so the browser doesn't block popups
+    };
+    openNext();
+  };
+
+  // Automatic send via backend (only if configured)
+  const autoSend = async () => {
+    setSending(true);
+    let sent = 0, failed = 0;
+    for (const r of withChannel) {
+      const msg = personalize(body, r);
+      const res = await sendAutomated(channel === "email" ? r.email : r.phone, msg, channel);
+      if (res.ok) sent++; else failed++;
+    }
+    setSending(false);
+    setSentResult({ count: sent, failed, mode: "auto" });
+    logAction("broadcast_auto", `${sent} sent, ${failed} failed to ${audience} via ${channel}`, "admin");
+  };
+
+  const backendOn = Boolean(import.meta.env?.VITE_API_URL);
+
+  return (
+    <>
+      <div className="notice" style={{ marginBottom: 16 }}>
+        📢 Send a message to many people at once. <strong>Manual mode</strong> opens each chat with your message pre-filled (free, works now). <strong>Auto mode</strong> sends silently in the background {backendOn ? "(backend connected ✓)" : "(needs backend + provider — not yet connected)"}.
+      </div>
+
+      <div className="form-card">
+        <div className="form-section-title">Compose Broadcast</div>
+
+        <div className="form-grid-2">
+          <div className="form-group">
+            <label className="form-label">Audience</label>
+            <select className="form-input form-select" value={audience} onChange={(e) => setAudience(e.target.value)}>
+              <option value="members">All Members</option>
+              <option value="newcomers">All Newcomers</option>
+              <option value="not_members">Not Yet Members</option>
+              <option value="active">Active (attending)</option>
+              <option value="flagged">Flagged / Overdue</option>
+              <option value="leaders">Cell Leaders</option>
+              <option value="all">Everyone</option>
+              {zones.map((z) => <option key={z} value={`zone:${z}`}>Zone: {z}</option>)}
+              {DEPARTMENTS.map((d) => <option key={d.id} value={`dept:${d.id}`}>Dept: {d.name}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Channel</label>
+            <div className="toggle-group">
+              {[["whatsapp", "WhatsApp"], ["sms", "SMS"], ["email", "Email"]].map(([id, label]) => (
+                <button key={id} className={"toggle-btn" + (channel === id ? " selected" : "")} onClick={() => setChannel(id)} style={{ fontSize: 12, padding: "8px 14px" }}>{label}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {channel === "email" && (
+          <div className="form-group" style={{ marginTop: 14 }}>
+            <label className="form-label">Email Subject</label>
+            <input className="form-input" value={subject} onChange={(e) => setSubject(e.target.value)} />
+          </div>
+        )}
+
+        <div className="form-group" style={{ marginTop: 14 }}>
+          <label className="form-label">Message — use {"{firstName}"}, {"{name}"}, {"{church}"}, {"{branch}"} for personalization</label>
+          <textarea className="form-input" rows={4} value={body} onChange={(e) => setBody(e.target.value)} style={{ resize: "vertical" }} />
+        </div>
+
+        <div style={{ background: "var(--blue-soft)", border: "1px solid #d4e2fb", borderRadius: 10, padding: 14, marginTop: 14 }}>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Preview (first recipient)</div>
+          <div style={{ fontSize: 13, color: "var(--navy)", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{sampleMsg}</div>
+        </div>
+
+        <div className="info-badge" style={{ marginTop: 14 }}>
+          Recipients matching: <span>{withChannel.length}</span>{channel === "email" && recipients.length !== withChannel.length ? ` (of ${recipients.length}, rest have no email)` : ""}
+        </div>
+
+        <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+          <button className="btn-primary" style={{ maxWidth: 280, opacity: sending ? 0.6 : 1 }} disabled={sending} onClick={manualSend}>
+            {sending ? "Opening…" : `💬 Manual Send (${withChannel.length})`}
+          </button>
+          {backendOn && (
+            <button className="btn-secondary" disabled={sending} onClick={autoSend}>⚡ Auto Send (background)</button>
+          )}
+        </div>
+
+        {sentResult && (
+          <div className="notice" style={{ marginTop: 14 }}>
+            ✅ {sentResult.mode === "manual" ? `Opened ${sentResult.count} message windows.` : `Sent ${sentResult.count}${sentResult.failed ? `, ${sentResult.failed} failed` : ""}.`}
+          </div>
+        )}
+        {sending && channel === "whatsapp" && (
+          <div className="notice notice-warn" style={{ marginTop: 12 }}>
+            💡 Your browser may ask to allow multiple popups — click Allow. Each opens a pre-filled WhatsApp; tap send on each.
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ============================================================
+//  DEPARTMENT OVERSIGHT — members assigned to departments,
+//  grouped under their Head of Department, with contacts.
+// ============================================================
+function DeptOversight({ db, newcomers, onAssignHead }) {
+  const leadership = db.leadership || [];
+
+  // Find the head for a department id
+  const headFor = (deptId) => leadership.find((p) => (p.roles || []).includes("deptHead") && p.deptId === deptId)
+    || { name: DEPARTMENTS.find((d) => d.id === deptId)?.leader || "—", phone: DEPARTMENTS.find((d) => d.id === deptId)?.leaderPhone || "" };
+
+  // People assigned to each department (deptAssigned or in departments[])
+  const byDept = DEPARTMENTS.map((dept) => {
+    const people = newcomers.filter((n) => n.deptAssigned === dept.id || (n.status === "member" && (n.departments || []).includes(dept.id)));
+    return { dept, head: headFor(dept.id), people };
+  }).filter((d) => d.people.length > 0);
+
+  const exportDeptCSV = () => {
+    const headers = ["Department", "Head of Dept", "Head Phone", "Member Name", "Member Phone", "Status"];
+    const rows = [];
+    byDept.forEach(({ dept, head, people }) => {
+      people.forEach((p) => rows.push([dept.name, head.name, head.phone, p.name, p.phone, p.status]));
+    });
+    const csv = [headers, ...rows].map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    downloadFile(csv, `dc_dutse_departments_${new Date().toISOString().split("T")[0]}.csv`);
+    logAction("export_dept_csv", `${rows.length} dept assignments`, "admin");
+  };
+
+  return (
+    <>
+      <div className="notice" style={{ marginBottom: 16 }}>
+        🏛 Members serving in each department, grouped under their Head of Department with contact numbers so HODs can reach them. Members reach the membership threshold, then get assigned to the department they indicated.
+      </div>
+
+      {byDept.length > 0 && (
+        <button className="btn-secondary" style={{ marginBottom: 16 }} onClick={exportDeptCSV}>⬇️ Export Department List (CSV)</button>
+      )}
+
+      {byDept.map(({ dept, head, people }) => (
+        <div key={dept.id} className="form-card" style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+            <div>
+              <div className="serif" style={{ fontSize: 15, color: "var(--navy)", fontWeight: 700 }}>{dept.name}</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+                Head: {head.name}{head.phone ? ` · 📞 ${head.phone}` : ""}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <span className="info-badge"><span>{people.length}</span> serving</span>
+              {head.phone && <a className="btn-wa" href={`tel:${head.phone}`} style={{ fontSize: 11, padding: "6px 12px", background: "var(--blue-soft)", borderColor: "#d4e2fb", color: "var(--navy)" }}>📞 Call Head</a>}
+            </div>
+          </div>
+          {people.map((p) => (
+            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{p.name}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>📞 {p.phone} · Cell: {p.assignedLeader?.name || "—"}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <a className="btn-wa" href={waLink(p.phone, `Hello ${p.name.split(" ")[0]}, this is the ${dept.name} of ${CHURCH.name} ${CHURCH.branch}. `)} target="_blank" rel="noreferrer" style={{ fontSize: 11, padding: "5px 10px" }}>💬</a>
+                <a className="btn-wa" href={`tel:${p.phone}`} style={{ fontSize: 11, padding: "5px 10px", background: "var(--blue-soft)", borderColor: "#d4e2fb", color: "var(--navy)" }}>📞</a>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+      {byDept.length === 0 && <div style={{ color: "var(--text-dim)", textAlign: "center", padding: 32 }}>No members assigned to departments yet. Members get assigned once they reach {CHURCH.membershipThreshold} services.</div>}
+    </>
   );
 }

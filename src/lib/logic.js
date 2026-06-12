@@ -11,12 +11,17 @@ import { getDB } from "./storage.js";
 export function assignCellLeader(area, sublocation) {
   const db = getDB();
   const leaders = db.cellLeaders || [];
-  // try exact sublocation match first, then area
-  const target = (sublocation || area || "").toLowerCase();
+  // Match on sublocation first (most precise), then on area.
+  // Leaders store `areas` as exact sublocation/area strings chosen from the
+  // same dropdowns the newcomer uses, so matches are reliable.
+  const sub = (sublocation || "").toLowerCase();
   const areaLc = (area || "").toLowerCase();
-  let match = leaders.find((l) => l.areas?.some((a) => a.toLowerCase() === target));
-  if (!match) match = leaders.find((l) => l.areas?.some((a) => a.toLowerCase() === areaLc));
-  return match || leaders[0] || null;
+  let match = null;
+  if (sub) match = leaders.find((l) => l.areas?.some((a) => a.toLowerCase() === sub));
+  if (!match && areaLc) match = leaders.find((l) => l.areas?.some((a) => a.toLowerCase() === areaLc));
+  // No fallback to leaders[0] — an unmatched newcomer stays UNASSIGNED on
+  // purpose, so the followup leader can assign them to the closest cell manually.
+  return match || null;
 }
 
 // Recompute a newcomer's status based on attendance count

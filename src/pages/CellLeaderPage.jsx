@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { CHURCH } from "../data/church.config.js";
 import { DEPARTMENTS } from "../data/seed.js";
-import { getDB, saveDB, logAction } from "../lib/storage.js";
+import { getDB, saveDB, logAction, updatePersonInCloud, supabaseEnabled } from "../lib/storage.js";
 import { computeStatus, followupOverdue, hoursSinceSubmit, sundaysAbsent } from "../lib/logic.js";
 import { waLink, newcomerWelcomeMsg, membershipMsg } from "../lib/notifications.js";
 
@@ -64,6 +64,7 @@ export default function CellLeaderPage({ db, refreshDB, auth, setAuth }) {
     nc.status = computeStatus(nc);
     saveDB(curr);
     logAction("attendance_marked", `${nc.name} on ${date} (now ${nc.attendance.length})`, leader.name);
+    if (supabaseEnabled) updatePersonInCloud(id, { ...nc });
     refreshDB();
     setSelected(nc);
   };
@@ -71,13 +72,23 @@ export default function CellLeaderPage({ db, refreshDB, auth, setAuth }) {
   const markContacted = (id) => {
     const curr = getDB();
     const nc = curr.newcomers.find((n) => n.id === id);
-    if (nc) { nc.contactedAt = new Date().toISOString(); saveDB(curr); logAction("contacted", nc.name, leader.name); refreshDB(); setSelected({ ...nc }); }
+    if (nc) {
+      nc.contactedAt = new Date().toISOString();
+      saveDB(curr); logAction("contacted", nc.name, leader.name);
+      if (supabaseEnabled) updatePersonInCloud(id, { ...nc });
+      refreshDB(); setSelected({ ...nc });
+    }
   };
 
   const markWhatsApp = (id) => {
     const curr = getDB();
     const nc = curr.newcomers.find((n) => n.id === id);
-    if (nc) { nc.whatsappAdded = true; saveDB(curr); logAction("whatsapp_added", nc.name, leader.name); refreshDB(); setSelected({ ...nc }); }
+    if (nc) {
+      nc.whatsappAdded = true;
+      saveDB(curr); logAction("whatsapp_added", nc.name, leader.name);
+      if (supabaseEnabled) updatePersonInCloud(id, { ...nc });
+      refreshDB(); setSelected({ ...nc });
+    }
   };
 
   const displayed = innerTab === "assigned" ? mine : innerTab === "pending" ? pending : innerTab === "members" ? members : innerTab === "overdue" ? overdue : active;

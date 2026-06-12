@@ -5,6 +5,10 @@
 // ============================================================
 
 import { CELL_LEADERS, DEPARTMENTS } from "../data/seed.js";
+import {
+  supabaseEnabled, sbListPeople, sbInsertPerson, sbUpdatePerson,
+  sbDeletePerson, getChurchId, supabase,
+} from "./supabase.js";
 
 const DB_KEY = "dc_dutse_db_v1";
 
@@ -111,3 +115,69 @@ export function resetDB() {
   localStorage.removeItem(DB_KEY);
   return initDB();
 }
+
+// ============================================================
+//  CLOUD SYNC (Supabase)
+//  When Supabase is configured, the local DB mirrors the cloud.
+//  pullFromCloud() loads people from Supabase into local state on
+//  startup; pushPersonToCloud() / updatePersonInCloud() write
+//  through on changes. Cell leaders & departments still seed
+//  locally but are also stored as people rows (roles array).
+// ============================================================
+
+export { supabaseEnabled };
+
+// Load all people from Supabase into the local DB shape.
+// Splits the unified `people` table back into newcomers + cellLeaders.
+export async function pullFromCloud() {
+  if (!supabaseEnabled) return getDB();
+  try {
+    const people = await sbListPeople();
+    const db = getDB();
+    // Cell leaders = anyone with the cellLeader role
+    const leaders = people.filter((p) => (p.roles || []).includes("cellLeader")).map((p) => ({
+      id: p.id, name: p.name, phone: p.phone, email: p.email,
+      zone: p.zone, roles: p.roles, areas: p.coverage || [],
+      canLogin: p.canLogin,
+    }));
+    // Newcomers/members = everyone else (or those with newcomer/member role)
+    const newcomers = people
+      .filter((p) => !(p.roles || []).includes("cellLeader") || (p.roles || []).includes("newcomer") || (p.roles || []).includes("member"))
+      .map((p) => ({
+        ...p,
+        assignedLeader: p.assignedLeaderId ? leaders.find((l) => l.id === p.assignedLeaderId) || null : null,
+      }));
+    // leadership = pastors, HODs, etc.
+    const leadership = people.filter((p) =>
+      (p.roles || []).some((r) => ["pastor", "zonalPastor", "deptHead"].includes(r))
+    );
+    db.newcomers = newcomers;
+    db.cellLeaders = leaders.length ? leaders : db.cellLeaders;
+    db.leadership = leadership;
+    db.cloudLoaded = true;
+    saveDB(db);
+    return db;
+  } catch (e) {
+    console.error("Cloud pull failed, using local data", e);
+    return getDB();
+  }
+}
+
+export async function pushPersonToCloud(person) {
+  if (!supabaseEnabled) return person;
+  try { return await sbInsertPerson(person); }
+  catch (e) { console.error("Cloud insert failed", e); return person; }
+}
+
+export async function updatePersonInCloud(id, patch) {
+  if (!supabaseEnabled) return;
+  try { await sbUpdatePerson(id, patch); }
+  catch (e) { console.error("Cloud update failed", e); }
+}
+
+export async function deletePersonFromCloud(id) {
+  if (!supabaseEnabled) return;
+  try { await sbDeletePerson(id); }
+  catch (e) { console.error("Cloud delete failed", e); }
+}
+

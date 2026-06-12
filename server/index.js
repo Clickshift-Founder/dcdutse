@@ -59,12 +59,23 @@ app.get("/api/newcomers", (_req, res) => {
   res.json(rows.map((r) => JSON.parse(r.data)));
 });
 
-// ---- Notification endpoint (WhatsApp / SMS) ----
+// ---- Notification endpoint (WhatsApp / SMS / Email) ----
 app.post("/api/notify", async (req, res) => {
-  const { to, message, channel } = req.body || {};
+  const { to, message, channel, subject } = req.body || {};
   if (!to || !message) return res.status(400).json({ ok: false, error: "missing to/message" });
 
   try {
+    if (channel === "email") {
+      if (process.env.EMAIL_PROVIDER === "resend" && process.env.EMAIL_API_KEY) {
+        const r = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${process.env.EMAIL_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ from: process.env.EMAIL_FROM, to, subject: subject || "Dominion City Dutse", text: message }),
+        });
+        return res.json({ ok: r.ok, provider: "resend" });
+      }
+      return res.json({ ok: false, error: "no-email-provider" });
+    }
     if (channel === "whatsapp" && process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_ID) {
       // WhatsApp Cloud API
       const r = await fetch(`https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`, {
@@ -100,4 +111,27 @@ app.post("/api/notify", async (req, res) => {
 app.get("/api/health", (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
 const PORT = process.env.PORT || 4000;
+
+// ---- Broadcast: send to many recipients, rate-limited ----
+app.post("/api/broadcast", async (req, res) => {
+  const { recipients, channel, subject } = req.body || {};
+  if (!Array.isArray(recipients) || recipients.length === 0) {
+    return res.status(400).json({ ok: false, error: "no recipients" });
+  }
+  let sent = 0, failed = 0;
+  for (const r of recipients) {
+    try {
+      const resp = await fetch(`http://localhost:${PORT}/api/notify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: r.to, message: r.message, channel, subject }),
+      });
+      const j = await resp.json();
+      j.ok ? sent++ : failed++;
+    } catch { failed++; }
+    await new Promise((s) => setTimeout(s, 300)); // gentle rate limit
+  }
+  res.json({ ok: true, sent, failed });
+});
+
 app.listen(PORT, () => console.log(`✝️  DC Connect backend running on http://localhost:${PORT}`));
