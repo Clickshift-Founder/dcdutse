@@ -8,19 +8,22 @@ import { CHURCH } from "../data/church.config.js";
 import { getDB } from "./storage.js";
 
 // Auto-match a newcomer to the cell leader covering their area
-export function assignCellLeader(area, sublocation) {
+export function assignCellLeader(area, sublocation, village) {
   const db = getDB();
   const leaders = db.cellLeaders || [];
-  // Match on sublocation first (most precise), then on area.
-  // Leaders store `areas` as exact sublocation/area strings chosen from the
-  // same dropdowns the newcomer uses, so matches are reliable.
+  // Match most-precise-first: village → neighbourhood → area.
+  // Leaders store `areas` as exact strings (village/neighbourhood/area)
+  // chosen from the same dropdowns the newcomer uses, so matches are reliable.
+  const vil = (village || "").toLowerCase();
   const sub = (sublocation || "").toLowerCase();
   const areaLc = (area || "").toLowerCase();
+  const has = (l, val) => l.areas?.some((a) => a.toLowerCase() === val);
   let match = null;
-  if (sub) match = leaders.find((l) => l.areas?.some((a) => a.toLowerCase() === sub));
-  if (!match && areaLc) match = leaders.find((l) => l.areas?.some((a) => a.toLowerCase() === areaLc));
-  // No fallback to leaders[0] — an unmatched newcomer stays UNASSIGNED on
-  // purpose, so the followup leader can assign them to the closest cell manually.
+  if (vil) match = leaders.find((l) => has(l, vil));
+  if (!match && sub) match = leaders.find((l) => has(l, sub));
+  if (!match && areaLc) match = leaders.find((l) => has(l, areaLc));
+  // No fallback — an unmatched newcomer stays UNASSIGNED on purpose, so the
+  // followup leader can assign them to the closest cell manually.
   return match || null;
 }
 

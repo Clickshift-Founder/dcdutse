@@ -427,10 +427,14 @@ const ROLES = [
 
 // ---- Add People: register existing pastors, HODs, members (not newcomers) ----
 function AddPeople({ db, refreshDB }) {
-  const blank = { name: "", phone: "", email: "", roles: [], zone: "", deptId: "", canLogin: false };
+  const LOC = mergeLocations(LOCATION_DATA, db.customLocations || []);
+  const blank = { name: "", phone: "", email: "", roles: [], zone: "", deptId: "", canLogin: false, area: "", sublocation: "", village: "" };
   const [f, setF] = useState(blank);
   const [imported, setImported] = useState(null);
   const importRef = useRef();
+
+  const subList = f.area ? Object.keys(LOC[f.area]?.subs || {}) : [];
+  const villageList = f.area && f.sublocation ? (LOC[f.area]?.subs?.[f.sublocation] || []) : [];
 
   const toggleRole = (r) => setF((x) => ({ ...x, roles: x.roles.includes(r) ? x.roles.filter((y) => y !== r) : [...x.roles, r] }));
 
@@ -461,6 +465,7 @@ function AddPeople({ db, refreshDB }) {
         name: f.name, phone: f.phone, email: f.email || null,
         roles: f.roles.length ? f.roles : ["member"],
         status: "member", zone: f.zone, deptId: f.deptId, canLogin: f.canLogin,
+        area: f.area, sublocation: f.sublocation, village: f.village,
       }).then(() => refreshDB());
     } else {
       refreshDB();
@@ -523,6 +528,28 @@ function AddPeople({ db, refreshDB }) {
           <div className="form-group"><label className="form-label">Phone *</label><input className="form-input" placeholder="0801..." value={f.phone} onChange={(e) => setF((x) => ({ ...x, phone: e.target.value }))} /></div>
         </div>
         <div className="form-group" style={{ marginTop: 14 }}><label className="form-label">Email (optional)</label><input className="form-input" type="email" placeholder="name@email.com — for email notifications" value={f.email} onChange={(e) => setF((x) => ({ ...x, email: e.target.value }))} /></div>
+
+        <div className="form-group" style={{ marginTop: 14 }}>
+          <label className="form-label">Home Address (optional, but helps with cell matching)</label>
+          <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+            <select className="form-input form-select" value={f.area} onChange={(e) => setF((x) => ({ ...x, area: e.target.value, sublocation: "", village: "" }))}>
+              <option value="">— Area —</option>
+              {Object.keys(LOC).map((a) => <option key={a} value={a}>{LOC[a].label}</option>)}
+            </select>
+            <select className="form-input form-select" value={f.sublocation} onChange={(e) => setF((x) => ({ ...x, sublocation: e.target.value, village: "" }))} disabled={!f.area}>
+              <option value="">{f.area ? "— Neighbourhood —" : "Area first"}</option>
+              {subList.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select className="form-input form-select" value={f.village} onChange={(e) => setF((x) => ({ ...x, village: e.target.value }))} disabled={!f.sublocation}>
+              <option value="">{f.sublocation ? "— Village —" : "Neighbourhood first"}</option>
+              {villageList.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="notice notice-warn" style={{ marginTop: 14, marginBottom: 0 }}>
+          💡 Adding a <strong>cell leader</strong>? Use the <strong>🧑‍💼 Cell Leaders</strong> tab instead — it lets you set their coverage locations so newcomers auto-match to them.
+        </div>
 
         <div className="form-group" style={{ marginTop: 14 }}>
           <label className="form-label">Role(s) — select all that apply</label>
@@ -750,19 +777,20 @@ function Leaders({ db, newcomers, refreshDB }) {
   const LOC = mergeLocations(LOCATION_DATA, db.customLocations || []);
   const [f, setF] = useState({ name: "", phone: "", zone: "", email: "" });
   const [areas, setAreas] = useState([]); // chosen coverage: [{area, sublocation}]
-  const [pick, setPick] = useState({ area: "", sub: "" });
+  const [pick, setPick] = useState({ area: "", sub: "", village: "" });
   const leaders = db.cellLeaders || [];
 
   const areaList = Object.keys(LOC);
   const subList = pick.area ? Object.keys(LOC[pick.area]?.subs || {}) : [];
+  const villageList = pick.area && pick.sub ? (LOC[pick.area]?.subs?.[pick.sub] || []) : [];
 
   const addCoverage = () => {
     if (!pick.area) return;
-    // store the sublocation if chosen (precise), else the whole area
-    const label = pick.sub || pick.area;
+    // Most precise chosen level becomes the match label: village > neighbourhood > area
+    const label = pick.village || pick.sub || pick.area;
     if (areas.some((a) => a.label === label)) return;
-    setAreas([...areas, { label, area: pick.area, sublocation: pick.sub }]);
-    setPick({ area: pick.area, sub: "" }); // keep area selected for adding more subs
+    setAreas([...areas, { label, area: pick.area, sublocation: pick.sub, village: pick.village }]);
+    setPick({ area: pick.area, sub: pick.sub, village: "" }); // keep area+sub for adding more villages
   };
   const removeCoverage = (label) => setAreas(areas.filter((a) => a.label !== label));
 
@@ -789,7 +817,7 @@ function Leaders({ db, newcomers, refreshDB }) {
       refreshDB();
     }
     setF({ name: "", phone: "", zone: "", email: "" });
-    setAreas([]); setPick({ area: "", sub: "" });
+    setAreas([]); setPick({ area: "", sub: "", village: "" });
   };
   const remove = (id) => {
     if (!confirm("Remove this cell leader?")) return;
@@ -811,23 +839,30 @@ function Leaders({ db, newcomers, refreshDB }) {
         <div className="form-grid-2">
           <div className="form-group"><label className="form-label">Full Name *</label><input className="form-input" placeholder="Bro/Sis ..." value={f.name} onChange={(e) => setF((x) => ({ ...x, name: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Phone *</label><input className="form-input" placeholder="0801..." value={f.phone} onChange={(e) => setF((x) => ({ ...x, phone: e.target.value }))} /></div>
-          <div className="form-group"><label className="form-label">Zone Name</label><input className="form-input" placeholder="Dutse Main Zone" value={f.zone} onChange={(e) => setF((x) => ({ ...x, zone: e.target.value }))} /></div>
+          <div className="form-group"><label className="form-label">Zone (org label, not used for matching)</label><input className="form-input" placeholder="e.g. Dutse Main Zone" value={f.zone} onChange={(e) => setF((x) => ({ ...x, zone: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Email (optional)</label><input className="form-input" placeholder="email@domain.com" value={f.email} onChange={(e) => setF((x) => ({ ...x, email: e.target.value }))} /></div>
         </div>
 
         <div className="form-group" style={{ marginTop: 16 }}>
-          <label className="form-label">Coverage Locations (where this leader's cell members live)</label>
-          <div className="form-grid-2" style={{ marginBottom: 10 }}>
-            <select className="form-input form-select" value={pick.area} onChange={(e) => setPick({ area: e.target.value, sub: "" })}>
-              <option value="">— Select area —</option>
+          <label className="form-label">Coverage Locations (where this leader's cell members live) — pick down to village for precise matching</label>
+          <div className="form-grid" style={{ marginBottom: 10, gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+            <select className="form-input form-select" value={pick.area} onChange={(e) => setPick({ area: e.target.value, sub: "", village: "" })}>
+              <option value="">— Area —</option>
               {areaList.map((a) => <option key={a} value={a}>{LOC[a].label}</option>)}
             </select>
-            <select className="form-input form-select" value={pick.sub} onChange={(e) => setPick((p) => ({ ...p, sub: e.target.value }))} disabled={!pick.area}>
-              <option value="">{pick.area ? "— Whole area, or pick neighbourhood —" : "Select an area first"}</option>
+            <select className="form-input form-select" value={pick.sub} onChange={(e) => setPick((p) => ({ ...p, sub: e.target.value, village: "" }))} disabled={!pick.area}>
+              <option value="">{pick.area ? "— Neighbourhood —" : "Area first"}</option>
               {subList.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select className="form-input form-select" value={pick.village} onChange={(e) => setPick((p) => ({ ...p, village: e.target.value }))} disabled={!pick.sub}>
+              <option value="">{pick.sub ? "— Village (optional) —" : "Neighbourhood first"}</option>
+              {villageList.map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
           </div>
           <button className="btn-secondary" onClick={addCoverage} disabled={!pick.area}>➕ Add this location</button>
+          <p style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 8 }}>
+            Tip: choosing a village gives the most precise auto-match. You can add several — e.g. all villages this leader covers.
+          </p>
 
           {areas.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
@@ -860,42 +895,147 @@ function Leaders({ db, newcomers, refreshDB }) {
 }
 
 function Locations({ db, refreshDB }) {
-  const [f, setF] = useState({ area: "", sub: "", villages: "" });
-  const add = () => {
-    if (!f.area || !f.sub) return;
+  const LOC = mergeLocations(LOCATION_DATA, db.customLocations || []);
+  const [mode, setMode] = useState("village"); // village | neighbourhood | area
+  const [sel, setSel] = useState({ area: "", sub: "" });
+  const [text, setText] = useState({ villages: "", newSub: "", newSubVillages: "", newArea: "", newAreaSub: "", newAreaVillages: "" });
+
+  const areaList = Object.keys(LOC);
+  const subList = sel.area ? Object.keys(LOC[sel.area]?.subs || {}) : [];
+  const villageList = sel.area && sel.sub ? (LOC[sel.area]?.subs?.[sel.sub] || []) : [];
+
+  const saveCustom = (entry, detail) => {
     const curr = getDB();
     curr.customLocations = curr.customLocations || [];
-    curr.customLocations.push({ id: "loc_" + Date.now(), ...f });
-    saveDB(curr); logAction("location_added", `${f.area} › ${f.sub}`, "admin"); refreshDB();
-    setF({ area: "", sub: "", villages: "" });
+    curr.customLocations.push({ id: "loc_" + Date.now(), ...entry });
+    saveDB(curr); logAction("location_added", detail, "admin"); refreshDB();
   };
-  const totalSubs = Object.values(LOCATION_DATA).reduce((t, a) => t + Object.keys(a.subs).length, 0);
+
+  // Add villages to an EXISTING area + neighbourhood (most common)
+  const addVillages = () => {
+    if (!sel.area || !sel.sub || !text.villages.trim()) return alert("Pick an area, a neighbourhood, and type at least one village.");
+    // Use the canonical existing keys so nothing duplicates
+    saveCustom({ area: sel.area, sub: sel.sub, villages: text.villages }, `Villages added to ${sel.area} › ${sel.sub}: ${text.villages}`);
+    setText((t) => ({ ...t, villages: "" }));
+    alert("Village(s) added ✓");
+  };
+
+  // Add a NEW neighbourhood to an existing area
+  const addNeighbourhood = () => {
+    if (!sel.area || !text.newSub.trim()) return alert("Pick an existing area and type the new neighbourhood name.");
+    saveCustom({ area: sel.area, sub: text.newSub, villages: text.newSubVillages }, `Neighbourhood added to ${sel.area}: ${text.newSub}`);
+    setText((t) => ({ ...t, newSub: "", newSubVillages: "" }));
+    alert("Neighbourhood added ✓");
+  };
+
+  // Add a brand-NEW area
+  const addArea = () => {
+    if (!text.newArea.trim() || !text.newAreaSub.trim()) return alert("Type the new area and at least one neighbourhood.");
+    saveCustom({ area: text.newArea, sub: text.newAreaSub, villages: text.newAreaVillages }, `New area added: ${text.newArea} › ${text.newAreaSub}`);
+    setText((t) => ({ ...t, newArea: "", newAreaSub: "", newAreaVillages: "" }));
+    alert("New area added ✓");
+  };
+
+  const totalSubs = Object.values(LOC).reduce((t, a) => t + Object.keys(a.subs).length, 0);
+  const totalVillages = Object.values(LOC).reduce((t, a) => t + Object.values(a.subs).reduce((s, v) => s + v.length, 0), 0);
+
   return (
     <>
-      <div className="form-card">
-        <div className="form-section-title">➕ Add New Location</div>
-        <div className="form-grid">
-          <div className="form-group"><label className="form-label">Area / District</label><input className="form-input" placeholder="e.g. Dutse New Extension" value={f.area} onChange={(e) => setF((x) => ({ ...x, area: e.target.value }))} /></div>
-          <div className="form-group"><label className="form-label">Sublocation / Ward</label><input className="form-input" placeholder="e.g. New Estate" value={f.sub} onChange={(e) => setF((x) => ({ ...x, sub: e.target.value }))} /></div>
-          <div className="form-group"><label className="form-label">Villages (optional, comma-separated)</label><input className="form-input" placeholder="Block A, Block B" value={f.villages} onChange={(e) => setF((x) => ({ ...x, villages: e.target.value }))} /></div>
-        </div>
-        <button className="btn-primary" style={{ marginTop: 12 }} onClick={add}>➕ Add Location</button>
+      <div className="notice" style={{ marginBottom: 16 }}>
+        📍 Add locations using the dropdowns below so nothing duplicates. Most additions are <strong>new villages</strong> under an existing neighbourhood — that's the default tab. New locations appear instantly in both the newcomer form and the cell-leader coverage picker.
       </div>
-      <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 12 }}>Loaded: {totalSubs} sublocations across {Object.keys(LOCATION_DATA).length} areas{(db.customLocations || []).length ? ` + ${db.customLocations.length} custom` : ""}</p>
-      {Object.entries(LOCATION_DATA).map(([k, v]) => (
-        <div key={k} className="form-card" style={{ marginBottom: 12 }}>
-          <div className="serif" style={{ fontSize: 13, color: v.color, marginBottom: 8 }}>{v.label}</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {Object.keys(v.subs).map((s) => <span key={s} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", borderRadius: 6, padding: "4px 10px", fontSize: 11, color: "var(--text-muted)" }}>{s}</span>)}
-          </div>
-        </div>
-      ))}
-      {(db.customLocations || []).length > 0 && (
+
+      <div className="tab-bar" style={{ marginBottom: 16 }}>
+        {[["village", "➕ Add Village(s)"], ["neighbourhood", "➕ New Neighbourhood"], ["area", "➕ New Area"]].map(([id, label]) => (
+          <button key={id} className={"tab-btn" + (mode === id ? " active" : "")} onClick={() => setMode(id)}>{label}</button>
+        ))}
+      </div>
+
+      {mode === "village" && (
         <div className="form-card">
-          <div className="form-section-title">Custom Added Locations</div>
-          {db.customLocations.map((l) => <div key={l.id} style={{ padding: "8px 0", borderBottom: "1px solid var(--border)", fontSize: 13, color: "var(--text)" }}>{l.area} › {l.sub} {l.villages ? `› ${l.villages}` : ""}</div>)}
+          <div className="form-section-title">Add Village(s) to an Existing Neighbourhood</div>
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Area / District</label>
+              <select className="form-input form-select" value={sel.area} onChange={(e) => setSel({ area: e.target.value, sub: "" })}>
+                <option value="">— Select area —</option>
+                {areaList.map((a) => <option key={a} value={a}>{LOC[a].label}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Neighbourhood / Ward</label>
+              <select className="form-input form-select" value={sel.sub} onChange={(e) => setSel((s) => ({ ...s, sub: e.target.value }))} disabled={!sel.area}>
+                <option value="">{sel.area ? "— Select neighbourhood —" : "Select an area first"}</option>
+                {subList.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+          {sel.area && sel.sub && villageList.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Existing villages here</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {villageList.map((v) => <span key={v} style={{ background: "var(--blue-soft)", border: "1px solid #d4e2fb", borderRadius: 6, padding: "4px 10px", fontSize: 11, color: "var(--navy)" }}>{v}</span>)}
+              </div>
+            </div>
+          )}
+          <div className="form-group" style={{ marginTop: 12 }}>
+            <label className="form-label">New Village(s) — comma-separated for multiple</label>
+            <input className="form-input" placeholder="e.g. First Transformer, Back of Mosque" value={text.villages} onChange={(e) => setText((t) => ({ ...t, villages: e.target.value }))} />
+          </div>
+          <button className="btn-primary" style={{ marginTop: 12 }} onClick={addVillages}>➕ Add Village(s)</button>
         </div>
       )}
+
+      {mode === "neighbourhood" && (
+        <div className="form-card">
+          <div className="form-section-title">Add a New Neighbourhood to an Existing Area</div>
+          <div className="form-group">
+            <label className="form-label">Area / District</label>
+            <select className="form-input form-select" value={sel.area} onChange={(e) => setSel({ area: e.target.value, sub: "" })}>
+              <option value="">— Select area —</option>
+              {areaList.map((a) => <option key={a} value={a}>{LOC[a].label}</option>)}
+            </select>
+          </div>
+          <div className="form-grid-2" style={{ marginTop: 12 }}>
+            <div className="form-group"><label className="form-label">New Neighbourhood Name</label><input className="form-input" placeholder="e.g. New Estate" value={text.newSub} onChange={(e) => setText((t) => ({ ...t, newSub: e.target.value }))} /></div>
+            <div className="form-group"><label className="form-label">Villages (optional, comma-separated)</label><input className="form-input" placeholder="Block A, Block B" value={text.newSubVillages} onChange={(e) => setText((t) => ({ ...t, newSubVillages: e.target.value }))} /></div>
+          </div>
+          <button className="btn-primary" style={{ marginTop: 12 }} onClick={addNeighbourhood}>➕ Add Neighbourhood</button>
+        </div>
+      )}
+
+      {mode === "area" && (
+        <div className="form-card">
+          <div className="form-section-title">Add a Brand-New Area</div>
+          <div className="form-grid">
+            <div className="form-group"><label className="form-label">New Area / District Name</label><input className="form-input" placeholder="e.g. Dutse New Extension" value={text.newArea} onChange={(e) => setText((t) => ({ ...t, newArea: e.target.value }))} /></div>
+            <div className="form-group"><label className="form-label">First Neighbourhood</label><input className="form-input" placeholder="e.g. Phase 1" value={text.newAreaSub} onChange={(e) => setText((t) => ({ ...t, newAreaSub: e.target.value }))} /></div>
+            <div className="form-group"><label className="form-label">Villages (optional, comma-separated)</label><input className="form-input" placeholder="Block A, Block B" value={text.newAreaVillages} onChange={(e) => setText((t) => ({ ...t, newAreaVillages: e.target.value }))} /></div>
+          </div>
+          <button className="btn-primary" style={{ marginTop: 12 }} onClick={addArea}>➕ Add Area</button>
+        </div>
+      )}
+
+      <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "16px 0 12px" }}>
+        Loaded: {Object.keys(LOC).length} areas · {totalSubs} neighbourhoods · {totalVillages} villages
+        {(db.customLocations || []).length ? ` (${db.customLocations.length} custom addition${db.customLocations.length > 1 ? "s" : ""})` : ""}
+      </p>
+
+      {Object.entries(LOC).map(([k, v]) => (
+        <div key={k} className="form-card" style={{ marginBottom: 12 }}>
+          <div className="serif" style={{ fontSize: 14, color: "var(--navy)", marginBottom: 10, fontWeight: 700 }}>{v.label}</div>
+          {Object.entries(v.subs).map(([s, villages]) => (
+            <div key={s} style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>{s}</div>
+              {villages.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5, paddingLeft: 10 }}>
+                  {villages.map((vil) => <span key={vil} style={{ background: "#f1f5f9", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 9px", fontSize: 11, color: "var(--text-muted)" }}>{vil}</span>)}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
     </>
   );
 }
@@ -957,6 +1097,7 @@ function Settings({ db, fileRef, onBackup, onImport, refreshDB }) {
 // ============================================================
 function CellPerformance({ db, newcomers }) {
   const [expanded, setExpanded] = useState(null);
+  const [q, setQ] = useState("");
   const leaders = db.cellLeaders || [];
 
   const rows = leaders.map((l) => {
@@ -976,11 +1117,59 @@ function CellPerformance({ db, newcomers }) {
 
   const unassigned = newcomers.filter((n) => !n.assignedLeader);
 
+  // Global totals across all cells
+  const totals = {
+    leaders: leaders.length,
+    souls: newcomers.length,
+    members: newcomers.filter((n) => n.status === "member").length,
+    pending: newcomers.filter((n) => n.status === "new").length,
+    active: newcomers.filter((n) => n.status === "active").length,
+    notContacted: newcomers.filter((n) => !n.contactedAt && n.status !== "member").length,
+  };
+
+  // Search: match a leader by name/phone, OR auto-expand a leader who has a
+  // matching soul, and surface that soul.
+  const ql = q.trim().toLowerCase();
+  const matchedSouls = ql ? newcomers.filter((n) => n.name.toLowerCase().includes(ql) || (n.phone || "").includes(ql)) : [];
+  const visibleRows = ql
+    ? rows.filter((r) =>
+        r.leader.name.toLowerCase().includes(ql) ||
+        (r.leader.phone || "").includes(ql) ||
+        r.assigned.some((n) => n.name.toLowerCase().includes(ql) || (n.phone || "").includes(ql))
+      )
+    : rows;
+
   return (
     <>
       <div className="notice" style={{ marginBottom: 16 }}>
-        🎯 A snapshot for the Pastor: every cell leader, how many souls they oversee, and exactly where each stands. Tap any leader to see their full list with statuses and contact buttons.
+        🎯 A snapshot for the Pastor: every cell leader, how many souls they oversee, and exactly where each stands. Tap any leader to see their full list. Use search to jump straight to a person or a leader.
       </div>
+
+      <div className="stat-grid" style={{ marginBottom: 16 }}>
+        <div className="stat-card"><div className="stat-num">{totals.souls}</div><div className="stat-label">Total Souls</div></div>
+        <div className="stat-card"><div className="stat-num" style={{ color: "var(--green)" }}>{totals.members}</div><div className="stat-label">Now Members</div></div>
+        <div className="stat-card"><div className="stat-num" style={{ color: "var(--blue)" }}>{totals.active}</div><div className="stat-label">Active (pending membership)</div></div>
+        <div className="stat-card"><div className="stat-num" style={{ color: "var(--gold)" }}>{totals.pending}</div><div className="stat-label">New / Pending</div></div>
+        <div className="stat-card"><div className="stat-num" style={{ color: "var(--red)" }}>{totals.notContacted}</div><div className="stat-label">Not Yet Contacted</div></div>
+        <div className="stat-card"><div className="stat-num">{totals.leaders}</div><div className="stat-label">Cell Leaders</div></div>
+      </div>
+
+      <input className="form-input" placeholder="🔍 Search a cell leader or a soul by name / phone…" value={q} onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 14, maxWidth: 440 }} />
+
+      {ql && matchedSouls.length > 0 && (
+        <div className="form-card" style={{ marginBottom: 16, padding: 16 }}>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Matching souls</div>
+          {matchedSouls.map((n) => (
+            <div key={n.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid var(--border)" }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>{n.name}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>📞 {n.phone} · Cell: {n.assignedLeader?.name || "⚠️ unassigned"} · {n.attendance?.length || 0}/{CHURCH.membershipThreshold} services</div>
+              </div>
+              <span className={"status-pill " + (n.status === "new" ? "pill-new" : n.status === "member" ? "pill-member" : n.status === "flagged" ? "pill-flagged" : "pill-active")}>{n.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {unassigned.length > 0 && (
         <div className="notice notice-warn" style={{ marginBottom: 16 }}>
@@ -988,7 +1177,7 @@ function CellPerformance({ db, newcomers }) {
         </div>
       )}
 
-      {rows.map(({ leader, assigned, total, pending, active, members, flagged, notContacted, overdue }) => (
+      {visibleRows.map(({ leader, assigned, total, pending, active, members, flagged, notContacted, overdue }) => (
         <div key={leader.id} style={{ marginBottom: 10 }}>
           <div className="newcomer-row" style={{ cursor: "pointer", marginBottom: 0 }} onClick={() => setExpanded(expanded === leader.id ? null : leader.id)}>
             <div style={{ flex: 1 }}>
@@ -1026,6 +1215,7 @@ function CellPerformance({ db, newcomers }) {
         </div>
       ))}
       {rows.length === 0 && <div style={{ color: "var(--text-dim)", textAlign: "center", padding: 32 }}>No cell leaders added yet.</div>}
+      {rows.length > 0 && visibleRows.length === 0 && <div style={{ color: "var(--text-dim)", textAlign: "center", padding: 32 }}>No cell leaders match "{q}".</div>}
     </>
   );
 }

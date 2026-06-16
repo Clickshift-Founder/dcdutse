@@ -74,16 +74,51 @@ export const LOCATION_DATA = {
   },
 };
 
-// Merge custom admin-added locations into the base data
+// Merge custom admin-added locations into the base data.
+// Matches existing areas/neighbourhoods case-insensitively (and against the
+// human label too) so "Dutse Main" resolves to the existing "Dutse" key
+// instead of creating a duplicate. Custom additions are mostly new villages.
 export function mergeLocations(base, customLocs = []) {
   const merged = JSON.parse(JSON.stringify(base));
+
+  // Resolve a typed area name to an existing key, or return null if new.
+  const findAreaKey = (typed) => {
+    const t = (typed || "").trim().toLowerCase();
+    return Object.keys(merged).find(
+      (k) => k.toLowerCase() === t || (merged[k].label || "").toLowerCase() === t
+    ) || null;
+  };
+  const findSubKey = (areaKey, typed) => {
+    const t = (typed || "").trim().toLowerCase();
+    return Object.keys(merged[areaKey].subs).find((k) => k.toLowerCase() === t) || null;
+  };
+
   customLocs.forEach((l) => {
-    if (!merged[l.area]) merged[l.area] = { label: l.area, color: "#9ca3af", subs: {} };
-    if (!merged[l.area].subs[l.sub]) merged[l.area].subs[l.sub] = [];
-    if (l.villages) {
-      l.villages.split(",").map((v) => v.trim()).filter(Boolean).forEach((v) => {
-        if (!merged[l.area].subs[l.sub].includes(v)) merged[l.area].subs[l.sub].push(v);
-      });
+    const typedArea = (l.area || "").trim();
+    const typedSub = (l.sub || "").trim();
+    if (!typedArea) return;
+
+    // Area: reuse existing key if it matches, else create new
+    let areaKey = findAreaKey(typedArea);
+    if (!areaKey) {
+      areaKey = typedArea;
+      merged[areaKey] = { label: typedArea, color: "#64748b", subs: {} };
+    }
+
+    // Neighbourhood: reuse existing key if it matches, else create new
+    if (typedSub) {
+      let subKey = findSubKey(areaKey, typedSub);
+      if (!subKey) {
+        subKey = typedSub;
+        merged[areaKey].subs[subKey] = [];
+      }
+      // Villages: add any new ones (case-insensitive de-dupe)
+      if (l.villages) {
+        const existing = merged[areaKey].subs[subKey].map((v) => v.toLowerCase());
+        l.villages.split(",").map((v) => v.trim()).filter(Boolean).forEach((v) => {
+          if (!existing.includes(v.toLowerCase())) merged[areaKey].subs[subKey].push(v);
+        });
+      }
     }
   });
   return merged;

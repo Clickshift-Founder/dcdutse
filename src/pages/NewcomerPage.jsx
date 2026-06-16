@@ -44,7 +44,7 @@ export default function NewcomerPage({ refreshDB, isOnline }) {
   const isValid = form.name.trim() && form.phone.trim() && form.area;
 
   const handleSubmit = () => {
-    const leader = assignCellLeader(form.area, form.sublocation);
+    const leader = assignCellLeader(form.area, form.sublocation, form.village);
     const record = {
       ...form,
       id: "nc_" + Date.now(),
