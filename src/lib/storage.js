@@ -35,6 +35,7 @@ export function initDB() {
   if (!db.leadership) db.leadership = []; // pastors, HODs, existing members (non-newcomer people)
   if (!db.departments) db.departments = DEPARTMENTS;
   if (!db.customLocations) db.customLocations = [];
+  if (!db.removedLocations) db.removedLocations = [];
   if (!db.syncQueue) db.syncQueue = [];
   if (!db.auditLog) db.auditLog = [];
   if (!db.deptHeads) db.deptHeads = {}; // deptId -> login pin (optional)

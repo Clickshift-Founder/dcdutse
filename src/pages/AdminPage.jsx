@@ -492,7 +492,7 @@ const ROLES = [
 
 // ---- Add People: register existing pastors, HODs, members (not newcomers) ----
 function AddPeople({ db, refreshDB }) {
-  const LOC = mergeLocations(LOCATION_DATA, db.customLocations || []);
+  const LOC = mergeLocations(LOCATION_DATA, db.customLocations || [], db.removedLocations || []);
   const blank = { name: "", phone: "", email: "", roles: [], zone: "", deptId: "", canLogin: false, area: "", sublocation: "", village: "" };
   const [f, setF] = useState(blank);
   const [imported, setImported] = useState(null);
@@ -851,23 +851,27 @@ function Birthdays() {
 }
 
 function Leaders({ db, newcomers, refreshDB }) {
-  const LOC = mergeLocations(LOCATION_DATA, db.customLocations || []);
+  const LOC = mergeLocations(LOCATION_DATA, db.customLocations || [], db.removedLocations || []);
   const [f, setF] = useState({ name: "", phone: "", zone: "", email: "", gender: "" });
-  const [areas, setAreas] = useState([]); // chosen coverage: [{area, sublocation}]
+  const [areas, setAreas] = useState([]); // chosen coverage for NEW leader
   const [pick, setPick] = useState({ area: "", sub: "", village: "" });
+  const [editId, setEditId] = useState(null); // id of leader being edited
+  const [edit, setEdit] = useState(null);      // editable copy
+  const [editPick, setEditPick] = useState({ area: "", sub: "", village: "" });
   const leaders = db.cellLeaders || [];
 
   const areaList = Object.keys(LOC);
   const subList = pick.area ? Object.keys(LOC[pick.area]?.subs || {}) : [];
   const villageList = pick.area && pick.sub ? (LOC[pick.area]?.subs?.[pick.sub] || []) : [];
+  const eSubList = editPick.area ? Object.keys(LOC[editPick.area]?.subs || {}) : [];
+  const eVillageList = editPick.area && editPick.sub ? (LOC[editPick.area]?.subs?.[editPick.sub] || []) : [];
 
   const addCoverage = () => {
     if (!pick.area) return;
-    // Most precise chosen level becomes the match label: village > neighbourhood > area
     const label = pick.village || pick.sub || pick.area;
     if (areas.some((a) => a.label === label)) return;
     setAreas([...areas, { label, area: pick.area, sublocation: pick.sub, village: pick.village }]);
-    setPick({ area: pick.area, sub: pick.sub, village: "" }); // keep area+sub for adding more villages
+    setPick({ area: pick.area, sub: pick.sub, village: "" });
   };
   const removeCoverage = (label) => setAreas(areas.filter((a) => a.label !== label));
 
@@ -882,7 +886,7 @@ function Leaders({ db, newcomers, refreshDB }) {
       id: "cl_" + Date.now(),
       name: f.name, phone: f.phone, zone: f.zone, email: f.email, gender: f.gender,
       roles: ["cellLeader"],
-      areas: coverage, // exact strings from the same dropdowns newcomers use
+      areas: coverage,
     });
     saveDB(curr); logAction("leader_added", `${f.name} (${f.gender}) covering ${coverage.join(", ")}`, "admin");
     if (supabaseEnabled) {
@@ -906,10 +910,47 @@ function Leaders({ db, newcomers, refreshDB }) {
     refreshDB();
   };
 
+  // ---- Editing an existing leader ----
+  const startEdit = (l) => {
+    setEditId(l.id);
+    setEdit({ name: l.name, phone: l.phone, zone: l.zone || "", email: l.email || "", gender: l.gender || "", areas: [...(l.areas || [])] });
+    setEditPick({ area: "", sub: "", village: "" });
+  };
+  const cancelEdit = () => { setEditId(null); setEdit(null); };
+  const addEditCoverage = () => {
+    if (!editPick.area) return;
+    const label = editPick.village || editPick.sub || editPick.area;
+    if (edit.areas.includes(label)) return;
+    setEdit((e) => ({ ...e, areas: [...e.areas, label] }));
+    setEditPick({ area: editPick.area, sub: editPick.sub, village: "" });
+  };
+  const removeEditCoverage = (label) => setEdit((e) => ({ ...e, areas: e.areas.filter((a) => a !== label) }));
+  const saveEdit = () => {
+    if (!edit.name || !edit.phone) return alert("Name and phone are required.");
+    if (!edit.gender) return alert("Gender is required for matching.");
+    const curr = getDB();
+    const l = curr.cellLeaders.find((x) => x.id === editId);
+    if (l) {
+      Object.assign(l, { name: edit.name, phone: edit.phone, zone: edit.zone, email: edit.email, gender: edit.gender, areas: edit.areas });
+      // Keep any newcomers' embedded snapshot of this leader in sync
+      (curr.newcomers || []).forEach((n) => {
+        if (n.assignedLeader?.id === editId) n.assignedLeader = { ...n.assignedLeader, ...l };
+      });
+      saveDB(curr);
+      logAction("leader_edited", `${edit.name} updated`, "admin");
+      if (supabaseEnabled) updatePersonInCloud(editId, {
+        name: edit.name, phone: edit.phone, email: edit.email || null, gender: edit.gender,
+        roles: l.roles || ["cellLeader"], status: "member", zone: edit.zone, coverage: edit.areas, canLogin: true,
+      });
+      refreshDB();
+    }
+    cancelEdit();
+  };
+
   return (
     <>
       <div className="notice" style={{ marginBottom: 16 }}>
-        🧑‍💼 Coverage locations use the same Area → Neighbourhood list as the newcomer form, so when a newcomer picks their address, the system auto-matches them to the cell leader covering it.
+        🧑‍💼 Coverage locations use the same Area → Neighbourhood → Village list as the newcomer form, so newcomers auto-match to the leader covering their address. Tap <strong>Edit</strong> on anyone to update their details or coverage anytime.
       </div>
 
       <div className="form-card">
@@ -931,7 +972,7 @@ function Leaders({ db, newcomers, refreshDB }) {
         </div>
 
         <div className="form-group" style={{ marginTop: 16 }}>
-          <label className="form-label">Coverage Locations (where this leader's cell members live) — pick down to village for precise matching</label>
+          <label className="form-label">Coverage Locations — pick down to village for precise matching</label>
           <div className="form-grid" style={{ marginBottom: 10, gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
             <select className="form-input form-select" value={pick.area} onChange={(e) => setPick({ area: e.target.value, sub: "", village: "" })}>
               <option value="">— Area —</option>
@@ -947,10 +988,6 @@ function Leaders({ db, newcomers, refreshDB }) {
             </select>
           </div>
           <button className="btn-secondary" onClick={addCoverage} disabled={!pick.area}>➕ Add this location</button>
-          <p style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 8 }}>
-            Tip: choosing a village gives the most precise auto-match. You can add several — e.g. all villages this leader covers.
-          </p>
-
           {areas.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
               {areas.map((a) => (
@@ -966,23 +1003,80 @@ function Leaders({ db, newcomers, refreshDB }) {
         <button className="btn-primary" style={{ marginTop: 16 }} onClick={add}>➕ Add Cell Leader</button>
       </div>
 
+      <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 12 }}>{leaders.length} cell leader{leaders.length !== 1 ? "s" : ""}</p>
+
       {leaders.map((l) => (
-        <div key={l.id} className="newcomer-row">
-          <div style={{ flex: 1 }}>
-            <div className="newcomer-name">{l.name} {l.gender && <span style={{ fontSize: 11, color: l.gender === "Female" ? "#db2777" : "var(--blue)" }}>· {l.gender}</span>} {l.roles?.includes("zonalPastor") && <span style={{ fontSize: 10, color: "var(--purple)" }}>· Zonal Pastor</span>}</div>
-            <div className="newcomer-meta">📞 {l.phone} · Zone: {l.zone || "—"}</div>
-            <div className="newcomer-meta">Covers: {(l.areas || []).join(", ") || "⚠️ no locations set"}</div>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Login PIN: {l.phone.slice(-4)} · {newcomers.filter((n) => n.assignedLeader?.id === l.id).length} assigned</div>
+        editId === l.id ? (
+          <div key={l.id} className="form-card" style={{ borderColor: "var(--blue)", borderWidth: 2 }}>
+            <div className="form-section-title">✏️ Editing {l.name}</div>
+            <div className="form-grid-2">
+              <div className="form-group"><label className="form-label">Full Name *</label><input className="form-input" value={edit.name} onChange={(e) => setEdit((x) => ({ ...x, name: e.target.value }))} /></div>
+              <div className="form-group"><label className="form-label">Phone *</label><input className="form-input" value={edit.phone} onChange={(e) => setEdit((x) => ({ ...x, phone: e.target.value }))} /></div>
+              <div className="form-group"><label className="form-label">Zone</label><input className="form-input" value={edit.zone} onChange={(e) => setEdit((x) => ({ ...x, zone: e.target.value }))} /></div>
+              <div className="form-group"><label className="form-label">Email</label><input className="form-input" value={edit.email} onChange={(e) => setEdit((x) => ({ ...x, email: e.target.value }))} /></div>
+            </div>
+            <div className="form-group" style={{ marginTop: 14 }}>
+              <label className="form-label">Gender *</label>
+              <div className="toggle-group">
+                {["Male", "Female"].map((g) => (
+                  <button key={g} className={"toggle-btn" + (edit.gender === g ? " selected" : "")} onClick={() => setEdit((x) => ({ ...x, gender: g }))}>{g}</button>
+                ))}
+              </div>
+            </div>
+            <div className="form-group" style={{ marginTop: 16 }}>
+              <label className="form-label">Coverage Locations</label>
+              <div className="form-grid" style={{ marginBottom: 10, gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <select className="form-input form-select" value={editPick.area} onChange={(e) => setEditPick({ area: e.target.value, sub: "", village: "" })}>
+                  <option value="">— Area —</option>
+                  {areaList.map((a) => <option key={a} value={a}>{LOC[a].label}</option>)}
+                </select>
+                <select className="form-input form-select" value={editPick.sub} onChange={(e) => setEditPick((p) => ({ ...p, sub: e.target.value, village: "" }))} disabled={!editPick.area}>
+                  <option value="">{editPick.area ? "— Neighbourhood —" : "Area first"}</option>
+                  {eSubList.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <select className="form-input form-select" value={editPick.village} onChange={(e) => setEditPick((p) => ({ ...p, village: e.target.value }))} disabled={!editPick.sub}>
+                  <option value="">{editPick.sub ? "— Village (optional) —" : "Neighbourhood first"}</option>
+                  {eVillageList.map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+              <button className="btn-secondary" onClick={addEditCoverage} disabled={!editPick.area}>➕ Add this location</button>
+              {edit.areas.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
+                  {edit.areas.map((a) => (
+                    <span key={a} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "var(--blue-soft)", border: "1px solid #d4e2fb", borderRadius: 8, padding: "5px 10px", fontSize: 12, color: "var(--navy)" }}>
+                      {a}
+                      <span onClick={() => removeEditCoverage(a)} style={{ cursor: "pointer", color: "var(--text-dim)", fontWeight: 700 }}>✕</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button className="btn-primary" style={{ flex: 1 }} onClick={saveEdit}>✓ Save Changes</button>
+              <button className="btn-secondary" onClick={cancelEdit}>Cancel</button>
+            </div>
           </div>
-          <button className="btn-danger" onClick={() => remove(l.id)}>Remove</button>
-        </div>
+        ) : (
+          <div key={l.id} className="newcomer-row">
+            <div style={{ flex: 1 }}>
+              <div className="newcomer-name">{l.name} {l.gender && <span style={{ fontSize: 11, color: l.gender === "Female" ? "#db2777" : "var(--blue)" }}>· {l.gender}</span>} {l.roles?.includes("zonalPastor") && <span style={{ fontSize: 10, color: "var(--purple)" }}>· Zonal Pastor</span>}</div>
+              <div className="newcomer-meta">📞 {l.phone}{l.email ? ` · ✉️ ${l.email}` : ""} · Zone: {l.zone || "—"}</div>
+              <div className="newcomer-meta">Covers: {(l.areas || []).join(", ") || "⚠️ no locations set"}</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Login PIN: {l.phone.slice(-4)} · {newcomers.filter((n) => n.assignedLeader?.id === l.id).length} assigned</div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+              <button className="btn-secondary" style={{ fontSize: 12, padding: "6px 14px" }} onClick={() => startEdit(l)}>✏️ Edit</button>
+              <button className="btn-danger" onClick={() => remove(l.id)}>Remove</button>
+            </div>
+          </div>
+        )
       ))}
     </>
   );
 }
 
 function Locations({ db, refreshDB }) {
-  const LOC = mergeLocations(LOCATION_DATA, db.customLocations || []);
+  const LOC = mergeLocations(LOCATION_DATA, db.customLocations || [], db.removedLocations || []);
   const [mode, setMode] = useState("village"); // village | neighbourhood | area
   const [sel, setSel] = useState({ area: "", sub: "" });
   const [text, setText] = useState({ villages: "", newSub: "", newSubVillages: "", newArea: "", newAreaSub: "", newAreaVillages: "" });
@@ -996,6 +1090,23 @@ function Locations({ db, refreshDB }) {
     curr.customLocations = curr.customLocations || [];
     curr.customLocations.push({ id: "loc_" + Date.now(), ...entry });
     saveDB(curr); logAction("location_added", detail, "admin"); refreshDB();
+  };
+
+  // Remove a location (village, neighbourhood, or area).
+  // Works for both base and custom locations via the removedLocations list.
+  const removeLocation = (area, sub, village) => {
+    const what = village || sub || area;
+    if (!confirm(`Remove "${what}"? It will no longer appear in the newcomer form or coverage picker.`)) return;
+    const curr = getDB();
+    // If it was a custom addition, drop it from customLocations too (keeps data clean)
+    curr.customLocations = (curr.customLocations || []).filter((l) => {
+      if (village) return !(l.area === area && l.sub === sub && (l.villages || "").split(",").map((v) => v.trim()).includes(village) && (l.villages || "").split(",").length === 1);
+      if (sub) return !(l.area === area && l.sub === sub);
+      return l.area !== area;
+    });
+    curr.removedLocations = curr.removedLocations || [];
+    curr.removedLocations.push({ area, sub: sub || "", village: village || "" });
+    saveDB(curr); logAction("location_removed", `${area}${sub ? " › " + sub : ""}${village ? " › " + village : ""}`, "admin"); refreshDB();
   };
 
   // Add villages to an EXISTING area + neighbourhood (most common)
@@ -1108,15 +1219,30 @@ function Locations({ db, refreshDB }) {
         {(db.customLocations || []).length ? ` (${db.customLocations.length} custom addition${db.customLocations.length > 1 ? "s" : ""})` : ""}
       </p>
 
+      <div className="notice notice-warn" style={{ margin: "16px 0" }}>
+        🗑️ Tap the ✕ on any village, neighbourhood, or area below to remove it (useful for wrongly-scraped or out-of-area entries). Removing a neighbourhood removes its villages too.
+      </div>
+
       {Object.entries(LOC).map(([k, v]) => (
         <div key={k} className="form-card" style={{ marginBottom: 12 }}>
-          <div className="serif" style={{ fontSize: 14, color: "var(--navy)", marginBottom: 10, fontWeight: 700 }}>{v.label}</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div className="serif" style={{ fontSize: 14, color: "var(--navy)", fontWeight: 700 }}>{v.label}</div>
+            <button className="btn-danger" onClick={() => removeLocation(k)} title="Remove whole area">✕ area</button>
+          </div>
           {Object.entries(v.subs).map(([s, villages]) => (
-            <div key={s} style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>{s}</div>
+            <div key={s} style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{s}</div>
+                <span onClick={() => removeLocation(k, s)} style={{ cursor: "pointer", color: "var(--red)", fontSize: 11, fontWeight: 600 }} title="Remove this neighbourhood">✕</span>
+              </div>
               {villages.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5, paddingLeft: 10 }}>
-                  {villages.map((vil) => <span key={vil} style={{ background: "#f1f5f9", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 9px", fontSize: 11, color: "var(--text-muted)" }}>{vil}</span>)}
+                  {villages.map((vil) => (
+                    <span key={vil} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "#f1f5f9", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 9px", fontSize: 11, color: "var(--text-muted)" }}>
+                      {vil}
+                      <span onClick={() => removeLocation(k, s, vil)} style={{ cursor: "pointer", color: "var(--red)", fontWeight: 700 }} title="Remove village">✕</span>
+                    </span>
+                  ))}
                 </div>
               )}
             </div>

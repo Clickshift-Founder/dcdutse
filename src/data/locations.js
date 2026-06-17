@@ -9,15 +9,15 @@ export const LOCATION_DATA = {
   "Dutse": {
     label: "Dutse (Main)", color: "#f59e0b",
     subs: {
-      "Dutse Alhaji": ["Sokale", "Gidan Bawa", "Dutse Express Area", "Shishinpe", "Tungan Sarkin"],
-      "Dutse Obasanjo Road": ["Freedom Avenue", "Mama Baby Area", "Obasanjo Rd Extension", "Obasanjo Close"],
+      "Dutse Alhaji": ["Sokale", "Gidan Bawa", "Dutse Express Area", "Shishinpe", "Tungan Sarkin", "Behind Mission School Zone 1"],
+      "Dutse Obasanjo Road": ["Freedom Avenue", "Mama Baby Area", "Obasanjo Rd Extension", "Obasanjo Close", "Mountain Side Layout", "First Transformer Street", "Data Set", "Uphill"],
       "Dutse Police Signboard": ["Signboard Area", "Tungan Signboard", "Signboard Extension"],
-      "Dutse Sokale": ["Sokale Main", "Sokale Phase 2", "Sokale Low Cost", "Sokale Extension", "Gidan Bawa (Sokale)"],
-      "Dutse Tipper Garage": ["Tipper Garage Area", "Mechanics Quarter", "Rugan Mota"],
-      "Dutse Makarantar": ["Old Dutse Village", "Makarantar Quarters", "Gidan Pawa"],
+      "Dutse Sokale": ["Sokale Main", "Sokale Phase 2", "Sokale Low Cost", "Sokale Extension", "Gidan Bawa (Sokale)", "First Transformer", "First High Tension", "Dura Garden"],
+      "Dutse Tipper Garage": ["Tipper Garage Area", "Mechanics Quarter", "Rugan Mota", "Tasty Plus Restaurant Area"],
+      "Dutse Makarantar": ["Old Dutse Village", "Makarantar Quarters", "Gidan Pawa", "Close to Mesuya Junction"],
       "Bamko": ["Bamko Phase 1", "Bamko Phase 2", "Bamko Extension", "Donabayi"],
-      "Ushafa": ["Ushafa Old Village", "Jigo", "Yaupe", "Pamba", "Peyi", "Kogo 1", "Kogo 2"],
-      "Dutse Bokuma": ["Bokuma Quarters", "Rugan S/Fulani"],
+      "Ushafa": ["Ushafa Old Village", "Jigo", "Yaupe", "Pamba", "Peyi", "Kogo 1", "Kogo 2", "SCC"],
+      "Dutse Baupma": ["Baupma Quarters", "Rugan S/Fulani", "Redeem Street Behind Elshadai School", "Elshaddia school road", "New Jerusalem"],
       "Dawaki (Dutse)": ["Dawaki Main", "Dawaki Extension", "Mapa"],
       "Gidan Pawa": ["Gidan Pawa Main", "Gidan Babachi", "Gidan Baushe"],
     },
@@ -72,13 +72,19 @@ export const LOCATION_DATA = {
     label: "Abaji", color: "#f97316",
     subs: { "Abaji Central": ["Abaji Town"], "Agyana / Pandagi": ["Agyana", "Pandagi"], "Nuku": ["Nuku"] },
   },
+  "Bmuko": {
+    label: "Bmuko", color: "#0ea5e9",
+    subs: {
+      "Success Avenue Zone F": ["Behind Chief Palace"],
+    },
+  },
 };
 
-// Merge custom admin-added locations into the base data.
-// Matches existing areas/neighbourhoods case-insensitively (and against the
-// human label too) so "Dutse Main" resolves to the existing "Dutse" key
-// instead of creating a duplicate. Custom additions are mostly new villages.
-export function mergeLocations(base, customLocs = []) {
+// Merge custom admin-added locations into the base data, and apply removals.
+// `removed` is an array of { area, sub, village } markers — village removes
+// just that village; sub (no village) removes the whole neighbourhood;
+// area only removes the whole area.
+export function mergeLocations(base, customLocs = [], removed = []) {
   const merged = JSON.parse(JSON.stringify(base));
 
   // Resolve a typed area name to an existing key, or return null if new.
@@ -98,21 +104,18 @@ export function mergeLocations(base, customLocs = []) {
     const typedSub = (l.sub || "").trim();
     if (!typedArea) return;
 
-    // Area: reuse existing key if it matches, else create new
     let areaKey = findAreaKey(typedArea);
     if (!areaKey) {
       areaKey = typedArea;
       merged[areaKey] = { label: typedArea, color: "#64748b", subs: {} };
     }
 
-    // Neighbourhood: reuse existing key if it matches, else create new
     if (typedSub) {
       let subKey = findSubKey(areaKey, typedSub);
       if (!subKey) {
         subKey = typedSub;
         merged[areaKey].subs[subKey] = [];
       }
-      // Villages: add any new ones (case-insensitive de-dupe)
       if (l.villages) {
         const existing = merged[areaKey].subs[subKey].map((v) => v.toLowerCase());
         l.villages.split(",").map((v) => v.trim()).filter(Boolean).forEach((v) => {
@@ -121,5 +124,25 @@ export function mergeLocations(base, customLocs = []) {
       }
     }
   });
+
+  // Apply removals last
+  removed.forEach((r) => {
+    const areaKey = findAreaKey(r.area);
+    if (!areaKey || !merged[areaKey]) return;
+    if (r.village) {
+      const subKey = findSubKey(areaKey, r.sub);
+      if (subKey && merged[areaKey].subs[subKey]) {
+        merged[areaKey].subs[subKey] = merged[areaKey].subs[subKey].filter(
+          (v) => v.toLowerCase() !== r.village.trim().toLowerCase()
+        );
+      }
+    } else if (r.sub) {
+      const subKey = findSubKey(areaKey, r.sub);
+      if (subKey) delete merged[areaKey].subs[subKey];
+    } else {
+      delete merged[areaKey];
+    }
+  });
+
   return merged;
 }

@@ -24,7 +24,7 @@ export default function NewcomerPage({ refreshDB, isOnline }) {
   const [dupWarning, setDupWarning] = useState(null);
 
   const db = getDB();
-  const LOC = mergeLocations(LOCATION_DATA, db.customLocations || []);
+  const LOC = mergeLocations(LOCATION_DATA, db.customLocations || [], db.removedLocations || []);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const areas = Object.keys(LOC);
