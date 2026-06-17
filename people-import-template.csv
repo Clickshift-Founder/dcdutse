@@ -1,7 +1,7 @@
-Name,Phone,Email,Roles,Zone,Department
-Pastor Stanley Nzewigbo,08030000001,stanley@dcdutse.org,pastor,,
-Pastor Mrs. Chioma Nzewigbo,08030000002,chioma@dcdutse.org,pastor,,
-Bro. John Adewale,08030000003,,cellLeader,Dutse Main Zone,
-Sis. Mary Okafor,08030000004,mary@email.com,deptHead,,choir
-Bro. Peter Eze,08030000005,,cellLeader;deptHead,Bwari Zone,ushering
-Sis. Grace Bello,08030000006,,member,,
+Name,Phone,Email,Gender,Roles,Zone,Department,Coverage
+Pastor Stanley Nzewigbo,08030000001,stanley@dcdutse.org,Male,pastor,,,
+Pastor Mrs. Chioma Nzewigbo,08030000002,chioma@dcdutse.org,Female,pastor,,,
+Bro. John Adewale,08030000003,,Male,cellLeader,Dutse Main Zone,,Dutse Sokale;Bamko
+Sis. Mary Okafor,08030000004,mary@email.com,Female,cellLeader;deptHead,Dutse Main Zone,choir,Dutse Alhaji
+Bro. Peter Eze,08030000005,,Male,cellLeader,Bwari Zone,,Kubwa;Bwari Central
+Sis. Grace Bello,08030000006,,Female,member,,,

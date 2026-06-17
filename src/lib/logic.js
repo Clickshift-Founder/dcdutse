@@ -8,22 +8,44 @@ import { CHURCH } from "../data/church.config.js";
 import { getDB } from "./storage.js";
 
 // Auto-match a newcomer to the cell leader covering their area
-export function assignCellLeader(area, sublocation, village) {
+export function assignCellLeader(area, sublocation, village, gender) {
   const db = getDB();
-  const leaders = db.cellLeaders || [];
-  // Match most-precise-first: village → neighbourhood → area.
-  // Leaders store `areas` as exact strings (village/neighbourhood/area)
-  // chosen from the same dropdowns the newcomer uses, so matches are reliable.
+  let leaders = db.cellLeaders || [];
+
+  // GENDER RULE (always enforced): newcomers are matched to same-gender
+  // cell leaders. We filter to same-gender leaders first, then apply
+  // location precision (village → neighbourhood → area) among them.
+  // If no same-gender leader covers the exact spot, we still prefer the
+  // nearest same-gender leader at a wider level rather than crossing gender.
+  const g = (gender || "").toLowerCase();
+  const sameGender = g ? leaders.filter((l) => (l.gender || "").toLowerCase() === g) : leaders;
+  // Only fall back to all leaders if we genuinely have no gender info or no
+  // same-gender leaders exist at all in the system.
+  const pool = sameGender.length ? sameGender : (g ? [] : leaders);
+
   const vil = (village || "").toLowerCase();
   const sub = (sublocation || "").toLowerCase();
   const areaLc = (area || "").toLowerCase();
   const has = (l, val) => l.areas?.some((a) => a.toLowerCase() === val);
+
   let match = null;
-  if (vil) match = leaders.find((l) => has(l, vil));
-  if (!match && sub) match = leaders.find((l) => has(l, sub));
-  if (!match && areaLc) match = leaders.find((l) => has(l, areaLc));
-  // No fallback — an unmatched newcomer stays UNASSIGNED on purpose, so the
-  // followup leader can assign them to the closest cell manually.
+  if (vil) match = pool.find((l) => has(l, vil));
+  if (!match && sub) match = pool.find((l) => has(l, sub));
+  if (!match && areaLc) match = pool.find((l) => has(l, areaLc));
+
+  // Wider fallback: nearest same-gender leader who shares the area at ANY
+  // level, even if their tagged coverage is broader than the newcomer's spot.
+  if (!match && pool.length) {
+    match = pool.find((l) =>
+      (l.areas || []).some((a) => {
+        const al = a.toLowerCase();
+        return al === vil || al === sub || al === areaLc;
+      })
+    );
+  }
+
+  // Still nothing? Leave unassigned (flagged for manual) rather than crossing
+  // the gender rule.
   return match || null;
 }
 

@@ -136,7 +136,7 @@ export async function pullFromCloud() {
     const db = getDB();
     // Cell leaders = anyone with the cellLeader role
     const leaders = people.filter((p) => (p.roles || []).includes("cellLeader")).map((p) => ({
-      id: p.id, name: p.name, phone: p.phone, email: p.email,
+      id: p.id, name: p.name, phone: p.phone, email: p.email, gender: p.gender,
       zone: p.zone, roles: p.roles, areas: p.coverage || [],
       canLogin: p.canLogin,
     }));

@@ -44,12 +44,12 @@ export const DEPARTMENTS = [
 // Cell leaders matched to the location areas they cover.
 // roles: a person can be cellLeader + zonalPastor + deptHead simultaneously.
 export const CELL_LEADERS = [
-  { id: "cl1", name: "Bro. Paul Eze", phone: "08012345601", email: "paul.eze@dc.ng", zone: "Dutse Main Zone", roles: ["cellLeader"], areas: ["Dutse Alhaji", "Dutse Obasanjo Road", "Dutse Police Signboard"] },
-  { id: "cl2", name: "Sis. Miriam Adeyemi", phone: "08012345602", email: "miriam.adeyemi@dc.ng", zone: "Dutse South Zone", roles: ["cellLeader", "deptHead"], areas: ["Dutse Sokale", "Dutse Bokuma", "Dutse Makarantar"] },
-  { id: "cl3", name: "Bro. Isaac Okoye", phone: "08012345603", email: "isaac.okoye@dc.ng", zone: "Dutse North Zone", roles: ["cellLeader"], areas: ["Dutse Tipper Garage", "Bamko", "Gidan Pawa"] },
-  { id: "cl4", name: "Sis. Hannah Moses", phone: "08012345604", email: "hannah.moses@dc.ng", zone: "Ushafa Zone", roles: ["cellLeader"], areas: ["Ushafa", "Dawaki (Dutse)"] },
-  { id: "cl5", name: "Pst. Caleb Bello", phone: "08012345605", email: "caleb.bello@dc.ng", zone: "Bwari Zone", roles: ["cellLeader", "zonalPastor"], areas: ["Bwari Central", "Byazhin", "Kawu", "Kuduru", "Shere", "Usuma"] },
-  { id: "cl6", name: "Sis. Deborah Nwosu", phone: "08012345606", email: "deborah.nwosu@dc.ng", zone: "Kubwa Zone", roles: ["cellLeader"], areas: ["Kubwa", "Ushafa Ward"] },
-  { id: "cl7", name: "Pst. Stephen Lawal", phone: "08012345607", email: "stephen.lawal@dc.ng", zone: "Abuja Central Zone", roles: ["cellLeader", "zonalPastor"], areas: ["Garki", "Wuse", "Maitama", "Gwarinpa", "Karu / Nyanya", "Mpape", "Gwagwa / Jiwa"] },
-  { id: "cl8", name: "Sis. Priscilla Abubakar", phone: "08012345608", email: "priscilla.abubakar@dc.ng", zone: "Gwagwalada Zone", roles: ["cellLeader"], areas: ["Gwagwalada Centre", "Zuba", "Kutunku", "Staff Quarters"] },
+  { id: "cl1", name: "Bro. Paul Eze", phone: "08012345601", email: "paul.eze@dc.ng", gender: "Male", zone: "Dutse Main Zone", roles: ["cellLeader"], areas: ["Dutse Alhaji", "Dutse Obasanjo Road", "Dutse Police Signboard"] },
+  { id: "cl2", name: "Sis. Miriam Adeyemi", phone: "08012345602", email: "miriam.adeyemi@dc.ng", gender: "Female", zone: "Dutse South Zone", roles: ["cellLeader", "deptHead"], areas: ["Dutse Sokale", "Dutse Bokuma", "Dutse Makarantar"] },
+  { id: "cl3", name: "Bro. Isaac Okoye", phone: "08012345603", email: "isaac.okoye@dc.ng", gender: "Male", zone: "Dutse North Zone", roles: ["cellLeader"], areas: ["Dutse Tipper Garage", "Bamko", "Gidan Pawa"] },
+  { id: "cl4", name: "Sis. Hannah Moses", phone: "08012345604", email: "hannah.moses@dc.ng", gender: "Female", zone: "Ushafa Zone", roles: ["cellLeader"], areas: ["Ushafa", "Dawaki (Dutse)"] },
+  { id: "cl5", name: "Pst. Caleb Bello", phone: "08012345605", email: "caleb.bello@dc.ng", gender: "Male", zone: "Bwari Zone", roles: ["cellLeader", "zonalPastor"], areas: ["Bwari Central", "Byazhin", "Kawu", "Kuduru", "Shere", "Usuma"] },
+  { id: "cl6", name: "Sis. Deborah Nwosu", phone: "08012345606", email: "deborah.nwosu@dc.ng", gender: "Female", zone: "Kubwa Zone", roles: ["cellLeader"], areas: ["Kubwa", "Ushafa Ward"] },
+  { id: "cl7", name: "Pst. Stephen Lawal", phone: "08012345607", email: "stephen.lawal@dc.ng", gender: "Male", zone: "Abuja Central Zone", roles: ["cellLeader", "zonalPastor"], areas: ["Garki", "Wuse", "Maitama", "Gwarinpa", "Karu / Nyanya", "Mpape", "Gwagwa / Jiwa"] },
+  { id: "cl8", name: "Sis. Priscilla Abubakar", phone: "08012345608", email: "priscilla.abubakar@dc.ng", gender: "Female", zone: "Gwagwalada Zone", roles: ["cellLeader"], areas: ["Gwagwalada Centre", "Zuba", "Kutunku", "Staff Quarters"] },
 ];

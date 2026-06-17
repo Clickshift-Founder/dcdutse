@@ -282,9 +282,17 @@ function AllRecords({ newcomers, onStatus, onDept, onDelete }) {
 // ---- Assignments: manually assign unassigned newcomers + message leaders ----
 function Assignments({ db, newcomers, refreshDB }) {
   const [view, setView] = useState("unassigned");
+  const [reassignFilter, setReassignFilter] = useState("mismatch");
   const leaders = db.cellLeaders || [];
 
   const unassigned = newcomers.filter((n) => !n.assignedLeader);
+  const assignedList = newcomers.filter((n) => n.assignedLeader);
+
+  // Gender mismatch = newcomer & their leader are different genders
+  const genderMismatch = (n) => {
+    const l = leaders.find((x) => x.id === n.assignedLeader?.id) || n.assignedLeader;
+    return n.gender && l?.gender && n.gender !== l.gender;
+  };
 
   const assignTo = (ncId, leaderId) => {
     if (!leaderId) return;
@@ -292,6 +300,10 @@ function Assignments({ db, newcomers, refreshDB }) {
     const curr = getDB();
     const nc = curr.newcomers.find((n) => n.id === ncId);
     if (nc && leader) {
+      // Soft warning if admin picks a cross-gender leader
+      if (nc.gender && leader.gender && nc.gender !== leader.gender) {
+        if (!confirm(`Heads up: ${nc.name} is ${nc.gender} but ${leader.name} is ${leader.gender}. Assign anyway?`)) return;
+      }
       nc.assignedLeader = leader;
       saveDB(curr);
       logAction("manual_assign", `${nc.name} → ${leader.name}`, "admin");
@@ -300,19 +312,35 @@ function Assignments({ db, newcomers, refreshDB }) {
     }
   };
 
-  // Suggest the geographically closest leader for an unassigned newcomer
+  // Gender-aware suggestion: same-gender, most precise location first
   const suggestLeader = (nc) => {
+    const g = (nc.gender || "").toLowerCase();
+    const pool = g ? leaders.filter((l) => (l.gender || "").toLowerCase() === g) : leaders;
+    const vil = (nc.village || "").toLowerCase();
     const sub = (nc.sublocation || "").toLowerCase();
     const area = (nc.area || "").toLowerCase();
-    let s = leaders.find((l) => l.areas?.some((a) => a.toLowerCase() === sub));
-    if (!s) s = leaders.find((l) => l.areas?.some((a) => a.toLowerCase() === area));
-    return s || null;
+    const has = (l, v) => l.areas?.some((a) => a.toLowerCase() === v);
+    return pool.find((l) => has(l, vil)) || pool.find((l) => has(l, sub)) || pool.find((l) => has(l, area)) || null;
   };
+
+  // Sort leaders in a dropdown: same-gender first, then by name
+  const leaderOptions = (nc) => {
+    const g = (nc.gender || "").toLowerCase();
+    return [...leaders].sort((a, b) => {
+      const am = (a.gender || "").toLowerCase() === g ? 0 : 1;
+      const bm = (b.gender || "").toLowerCase() === g ? 0 : 1;
+      return am - bm || a.name.localeCompare(b.name);
+    });
+  };
+
+  const optLabel = (l) => `${l.name} · ${l.gender || "?"} · ${(l.areas || []).slice(0, 2).join(", ")}${(l.areas || []).length > 2 ? "…" : ""}`;
+
+  const reassignList = assignedList.filter((n) => reassignFilter === "all" || genderMismatch(n));
 
   return (
     <>
       <div className="tab-bar" style={{ marginBottom: 18 }}>
-        {[["unassigned", `🔴 Unassigned (${unassigned.length})`], ["byleader", "📣 Message Leaders"]].map(([id, label]) => (
+        {[["unassigned", `🔴 Unassigned (${unassigned.length})`], ["reassign", `🔄 Reassign`], ["byleader", "📣 Message Leaders"]].map(([id, label]) => (
           <button key={id} className={"tab-btn" + (view === id ? " active" : "")} onClick={() => setView(id)}>{label}</button>
         ))}
       </div>
@@ -320,21 +348,23 @@ function Assignments({ db, newcomers, refreshDB }) {
       {view === "unassigned" && (
         <>
           <div className="notice notice-warn" style={{ marginBottom: 16 }}>
-            🔗 These newcomers had no cell leader covering their exact location. Assign each to the closest leader — a suggestion is pre-selected where possible.
+            🔗 These newcomers had no same-gender cell leader covering their location. Assign each to the closest one — a same-gender suggestion is pre-selected where possible. Same-gender leaders are listed first in the dropdown.
           </div>
           {unassigned.map((nc) => {
             const suggested = suggestLeader(nc);
             return (
               <div key={nc.id} className="newcomer-row">
                 <div style={{ flex: 1 }}>
-                  <div className="newcomer-name">{nc.name}</div>
+                  <div className="newcomer-name">{nc.name} {nc.gender && <span style={{ fontSize: 11, color: nc.gender === "Female" ? "#db2777" : "var(--blue)" }}>· {nc.gender}</span>}</div>
                   <div className="newcomer-meta">📞 {nc.phone} · 📍 {nc.area}{nc.sublocation ? ` › ${nc.sublocation}` : ""}{nc.village ? ` › ${nc.village}` : ""}</div>
-                  {suggested && <div className="newcomer-meta" style={{ color: "var(--blue)" }}>💡 Suggested: {suggested.name} ({suggested.zone})</div>}
+                  {suggested
+                    ? <div className="newcomer-meta" style={{ color: "var(--blue)" }}>💡 Suggested: {suggested.name} ({suggested.gender}, {suggested.zone || "—"})</div>
+                    : <div className="newcomer-meta" style={{ color: "var(--red)" }}>⚠️ No same-gender leader covers this area yet</div>}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-                  <select className="form-input form-select" style={{ fontSize: 12, padding: "7px 28px 7px 10px", width: "auto" }} defaultValue={suggested?.id || ""} id={`assign-${nc.id}`}>
+                  <select className="form-input form-select" style={{ fontSize: 12, padding: "7px 28px 7px 10px", width: "auto", maxWidth: 260 }} defaultValue={suggested?.id || ""} id={`assign-${nc.id}`}>
                     <option value="">— Choose leader —</option>
-                    {leaders.map((l) => <option key={l.id} value={l.id}>{l.name} · {l.zone}</option>)}
+                    {leaderOptions(nc).map((l) => <option key={l.id} value={l.id}>{optLabel(l)}</option>)}
                   </select>
                   <button className="btn-secondary" style={{ fontSize: 12 }} onClick={() => assignTo(nc.id, document.getElementById(`assign-${nc.id}`).value)}>✓ Assign</button>
                 </div>
@@ -342,6 +372,41 @@ function Assignments({ db, newcomers, refreshDB }) {
             );
           })}
           {unassigned.length === 0 && <div style={{ color: "var(--text-dim)", textAlign: "center", padding: 32 }}>Everyone is assigned to a cell leader 🎉</div>}
+        </>
+      )}
+
+      {view === "reassign" && (
+        <>
+          <div className="notice" style={{ marginBottom: 14 }}>
+            🔄 Reassign anyone who's already matched — useful to fix a cross-gender match or move someone to a nearer cell. The dropdown shows each leader's gender and coverage; same-gender leaders are listed first.
+          </div>
+          <div className="tab-bar" style={{ marginBottom: 16 }}>
+            {[["mismatch", `⚠️ Gender Mismatches (${assignedList.filter(genderMismatch).length})`], ["all", `All Assigned (${assignedList.length})`]].map(([id, label]) => (
+              <button key={id} className={"tab-btn" + (reassignFilter === id ? " active" : "")} onClick={() => setReassignFilter(id)}>{label}</button>
+            ))}
+          </div>
+          {reassignList.map((nc) => {
+            const mismatch = genderMismatch(nc);
+            return (
+              <div key={nc.id} className="newcomer-row" style={mismatch ? { borderColor: "#f4c9c9" } : undefined}>
+                <div style={{ flex: 1 }}>
+                  <div className="newcomer-name">{nc.name} {nc.gender && <span style={{ fontSize: 11, color: nc.gender === "Female" ? "#db2777" : "var(--blue)" }}>· {nc.gender}</span>}</div>
+                  <div className="newcomer-meta">📞 {nc.phone} · 📍 {nc.area}{nc.sublocation ? ` › ${nc.sublocation}` : ""}{nc.village ? ` › ${nc.village}` : ""}</div>
+                  <div className="newcomer-meta" style={mismatch ? { color: "var(--red)" } : undefined}>
+                    {mismatch ? "⚠️ " : "Cell: "}{nc.assignedLeader?.name} ({nc.assignedLeader?.gender || "?"}){mismatch ? " — cross-gender, consider reassigning" : ""}
+                  </div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                  <select className="form-input form-select" style={{ fontSize: 12, padding: "7px 28px 7px 10px", width: "auto", maxWidth: 260 }} defaultValue={nc.assignedLeader?.id || ""} id={`reassign-${nc.id}`}>
+                    <option value="">— Choose leader —</option>
+                    {leaderOptions(nc).map((l) => <option key={l.id} value={l.id}>{optLabel(l)}</option>)}
+                  </select>
+                  <button className="btn-secondary" style={{ fontSize: 12 }} onClick={() => assignTo(nc.id, document.getElementById(`reassign-${nc.id}`).value)}>🔄 Reassign</button>
+                </div>
+              </div>
+            );
+          })}
+          {reassignList.length === 0 && <div style={{ color: "var(--text-dim)", textAlign: "center", padding: 32 }}>{reassignFilter === "mismatch" ? "No gender mismatches 🎉" : "No one assigned yet."}</div>}
         </>
       )}
 
@@ -356,7 +421,7 @@ function Assignments({ db, newcomers, refreshDB }) {
             return (
               <div key={l.id} className="newcomer-row">
                 <div style={{ flex: 1 }}>
-                  <div className="newcomer-name">{l.name}</div>
+                  <div className="newcomer-name">{l.name} {l.gender && <span style={{ fontSize: 11, color: l.gender === "Female" ? "#db2777" : "var(--blue)" }}>· {l.gender}</span>}</div>
                   <div className="newcomer-meta">📞 {l.phone} · {l.zone || "—"}</div>
                   <div className="newcomer-meta">{assigned.length} {assigned.length === 1 ? "soul" : "souls"} assigned{assigned.length ? `: ${assigned.slice(0, 3).map((n) => n.name.split(" ")[0]).join(", ")}${assigned.length > 3 ? "…" : ""}` : ""}</div>
                 </div>
@@ -487,21 +552,33 @@ function AddPeople({ db, refreshDB }) {
       const cloudInserts = [];
       rows.forEach((line) => {
         const cells = line.split(",").map((c) => c.replace(/^"|"$/g, "").trim());
-        const [name, phone, email, roles, zone, dept] = cells;
+        const [name, phone, email, gender, roles, zone, dept, coverage] = cells;
         if (!name || !phone) return;
         const roleArr = roles ? roles.split(/[;|]/).map((r) => r.trim()).filter(Boolean) : ["member"];
+        const coverageArr = coverage ? coverage.split(/[;|]/).map((c) => c.trim()).filter(Boolean) : [];
         curr.leadership.push({
           id: "person_" + Date.now() + "_" + count,
-          name, phone, email: email || "",
+          name, phone, email: email || "", gender: gender || "",
           roles: roleArr,
           zone: zone || "", deptId: dept || "",
           canLogin: false, status: "member",
           addedAt: new Date().toISOString(),
         });
+        // If this person is a cell leader, also register them in cellLeaders
+        // (with gender + coverage) so matching and the portal work.
+        if (roleArr.includes("cellLeader")) {
+          curr.cellLeaders = curr.cellLeaders || [];
+          curr.cellLeaders.push({
+            id: "cl_csv_" + Date.now() + "_" + count,
+            name, phone, email: email || "", gender: gender || "",
+            zone: zone || "", roles: roleArr, areas: coverageArr,
+          });
+        }
         if (supabaseEnabled) {
           cloudInserts.push(pushPersonToCloud({
-            name, phone, email: email || null, roles: roleArr,
+            name, phone, email: email || null, gender: gender || "", roles: roleArr,
             status: "member", zone: zone || "", deptId: dept || "",
+            coverage: coverageArr,
           }));
         }
         count++;
@@ -588,7 +665,7 @@ function AddPeople({ db, refreshDB }) {
       <div className="form-card">
         <div className="form-section-title">📥 Bulk Import (CSV)</div>
         <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12, lineHeight: 1.6 }}>
-          Upload a CSV with columns: <code>Name, Phone, Email, Roles, Zone, Department</code>. Email is optional. Separate multiple roles with a semicolon (e.g. <code>cellLeader;deptHead</code>). Roles can be: member, cellLeader, zonalPastor, deptHead, pastor.
+          Upload a CSV with columns: <code>Name, Phone, Email, Gender, Roles, Zone, Department, Coverage</code>. Email is optional. Gender (Male/Female) is needed for cell leaders so newcomers match same-gender. Separate multiple roles or coverage locations with a semicolon (e.g. roles <code>cellLeader;deptHead</code>, coverage <code>Dutse Sokale;Bamko</code>). Roles: member, cellLeader, zonalPastor, deptHead, pastor.
         </p>
         <button className="btn-secondary" onClick={() => importRef.current?.click()}>📂 Choose CSV File</button>
         <input ref={importRef} type="file" accept=".csv" style={{ display: "none" }} onChange={handleCSV} />
@@ -775,7 +852,7 @@ function Birthdays() {
 
 function Leaders({ db, newcomers, refreshDB }) {
   const LOC = mergeLocations(LOCATION_DATA, db.customLocations || []);
-  const [f, setF] = useState({ name: "", phone: "", zone: "", email: "" });
+  const [f, setF] = useState({ name: "", phone: "", zone: "", email: "", gender: "" });
   const [areas, setAreas] = useState([]); // chosen coverage: [{area, sublocation}]
   const [pick, setPick] = useState({ area: "", sub: "", village: "" });
   const leaders = db.cellLeaders || [];
@@ -796,27 +873,28 @@ function Leaders({ db, newcomers, refreshDB }) {
 
   const add = () => {
     if (!f.name || !f.phone) return alert("Name and phone are required.");
+    if (!f.gender) return alert("Please select the leader's gender — it's used to match newcomers to same-gender leaders.");
     if (areas.length === 0) return alert("Add at least one coverage location so newcomers can be auto-matched.");
     const curr = getDB();
     curr.cellLeaders = curr.cellLeaders || [];
     const coverage = areas.map((a) => a.label);
     curr.cellLeaders.push({
       id: "cl_" + Date.now(),
-      name: f.name, phone: f.phone, zone: f.zone, email: f.email,
+      name: f.name, phone: f.phone, zone: f.zone, email: f.email, gender: f.gender,
       roles: ["cellLeader"],
       areas: coverage, // exact strings from the same dropdowns newcomers use
     });
-    saveDB(curr); logAction("leader_added", `${f.name} covering ${coverage.join(", ")}`, "admin");
+    saveDB(curr); logAction("leader_added", `${f.name} (${f.gender}) covering ${coverage.join(", ")}`, "admin");
     if (supabaseEnabled) {
       pushPersonToCloud({
-        name: f.name, phone: f.phone, email: f.email || null,
+        name: f.name, phone: f.phone, email: f.email || null, gender: f.gender,
         roles: ["cellLeader"], status: "member",
         zone: f.zone, coverage, canLogin: true,
       }).then(() => refreshDB());
     } else {
       refreshDB();
     }
-    setF({ name: "", phone: "", zone: "", email: "" });
+    setF({ name: "", phone: "", zone: "", email: "", gender: "" });
     setAreas([]); setPick({ area: "", sub: "", village: "" });
   };
   const remove = (id) => {
@@ -841,6 +919,15 @@ function Leaders({ db, newcomers, refreshDB }) {
           <div className="form-group"><label className="form-label">Phone *</label><input className="form-input" placeholder="0801..." value={f.phone} onChange={(e) => setF((x) => ({ ...x, phone: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Zone (org label, not used for matching)</label><input className="form-input" placeholder="e.g. Dutse Main Zone" value={f.zone} onChange={(e) => setF((x) => ({ ...x, zone: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Email (optional)</label><input className="form-input" placeholder="email@domain.com" value={f.email} onChange={(e) => setF((x) => ({ ...x, email: e.target.value }))} /></div>
+        </div>
+
+        <div className="form-group" style={{ marginTop: 14 }}>
+          <label className="form-label">Gender * (newcomers are matched to same-gender leaders)</label>
+          <div className="toggle-group">
+            {["Male", "Female"].map((g) => (
+              <button key={g} className={"toggle-btn" + (f.gender === g ? " selected" : "")} onClick={() => setF((x) => ({ ...x, gender: g }))}>{g}</button>
+            ))}
+          </div>
         </div>
 
         <div className="form-group" style={{ marginTop: 16 }}>
@@ -882,7 +969,7 @@ function Leaders({ db, newcomers, refreshDB }) {
       {leaders.map((l) => (
         <div key={l.id} className="newcomer-row">
           <div style={{ flex: 1 }}>
-            <div className="newcomer-name">{l.name} {l.roles?.includes("zonalPastor") && <span style={{ fontSize: 10, color: "var(--purple)" }}>· Zonal Pastor</span>}</div>
+            <div className="newcomer-name">{l.name} {l.gender && <span style={{ fontSize: 11, color: l.gender === "Female" ? "#db2777" : "var(--blue)" }}>· {l.gender}</span>} {l.roles?.includes("zonalPastor") && <span style={{ fontSize: 10, color: "var(--purple)" }}>· Zonal Pastor</span>}</div>
             <div className="newcomer-meta">📞 {l.phone} · Zone: {l.zone || "—"}</div>
             <div className="newcomer-meta">Covers: {(l.areas || []).join(", ") || "⚠️ no locations set"}</div>
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Login PIN: {l.phone.slice(-4)} · {newcomers.filter((n) => n.assignedLeader?.id === l.id).length} assigned</div>
