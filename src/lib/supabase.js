@@ -118,3 +118,24 @@ export async function sbLogMessage(m) {
   const cid = await getChurchId();
   await supabase.from("messages").insert({ church_id: cid, ...m });
 }
+
+// ---- Cell reports ----
+export async function sbListReports() {
+  const cid = await getChurchId();
+  const { data, error } = await supabase.from("cell_reports").select("*").eq("church_id", cid).order("week_of", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function sbInsertReport(r) {
+  const cid = await getChurchId();
+  const { data, error } = await supabase.from("cell_reports").insert({ church_id: cid, ...r }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function sbUpdateReport(id, patch) {
+  const { data, error } = await supabase.from("cell_reports").update(patch).eq("id", id).select().single();
+  if (error) throw error;
+  return data;
+}

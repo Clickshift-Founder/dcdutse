@@ -95,10 +95,15 @@ export function upcomingBirthdays(days = 14) {
   const results = [];
   (db.newcomers || []).forEach((n) => {
     if (!n.birthday) return;
-    const bd = new Date(n.birthday);
-    if (isNaN(bd)) return;
-    const next = new Date(now.getFullYear(), bd.getMonth(), bd.getDate());
-    if (next < now.setHours(0, 0, 0, 0)) next.setFullYear(now.getFullYear() + 1);
+    // Birthday may be "YYYY-MM-DD" (with year) or "MM-DD" (year omitted).
+    const parts = String(n.birthday).split("-");
+    let month, day;
+    if (parts.length === 3) { month = parseInt(parts[1], 10) - 1; day = parseInt(parts[2], 10); }
+    else if (parts.length === 2) { month = parseInt(parts[0], 10) - 1; day = parseInt(parts[1], 10); }
+    else return;
+    if (isNaN(month) || isNaN(day)) return;
+    const next = new Date(now.getFullYear(), month, day);
+    if (next < new Date(new Date().setHours(0, 0, 0, 0))) next.setFullYear(now.getFullYear() + 1);
     const diff = Math.ceil((next - new Date().setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
     if (diff >= 0 && diff <= days) results.push({ ...n, daysUntil: diff });
   });

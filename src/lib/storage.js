@@ -8,6 +8,7 @@ import { CELL_LEADERS, DEPARTMENTS } from "../data/seed.js";
 import {
   supabaseEnabled, sbListPeople, sbInsertPerson, sbUpdatePerson,
   sbDeletePerson, getChurchId, supabase,
+  sbListReports, sbInsertReport, sbUpdateReport,
 } from "./supabase.js";
 
 const DB_KEY = "dc_dutse_db_v1";
@@ -36,6 +37,8 @@ export function initDB() {
   if (!db.departments) db.departments = DEPARTMENTS;
   if (!db.customLocations) db.customLocations = [];
   if (!db.removedLocations) db.removedLocations = [];
+  if (!db.cellReports) db.cellReports = [];
+  if (!db.cellAdminTabs) db.cellAdminTabs = null; // null = use defaults from config
   if (!db.syncQueue) db.syncQueue = [];
   if (!db.auditLog) db.auditLog = [];
   if (!db.deptHeads) db.deptHeads = {}; // deptId -> login pin (optional)
@@ -157,6 +160,8 @@ export async function pullFromCloud() {
     db.leadership = leadership;
     db.cloudLoaded = true;
     saveDB(db);
+    // Also pull cell reports
+    try { db.cellReports = await sbListReports(); saveDB(db); } catch (e) { /* ignore */ }
     return db;
   } catch (e) {
     console.error("Cloud pull failed, using local data", e);
@@ -182,3 +187,46 @@ export async function deletePersonFromCloud(id) {
   catch (e) { console.error("Cloud delete failed", e); }
 }
 
+
+// ============================================================
+//  CELL REPORTS (local + cloud)
+// ============================================================
+export async function loadReports() {
+  if (supabaseEnabled) {
+    try {
+      const reports = await sbListReports();
+      const db = getDB();
+      db.cellReports = reports;
+      saveDB(db);
+      return reports;
+    } catch (e) { console.error("Report load failed", e); return getDB().cellReports || []; }
+  }
+  return getDB().cellReports || [];
+}
+
+export async function submitReport(report) {
+  const db = getDB();
+  db.cellReports = db.cellReports || [];
+  if (supabaseEnabled) {
+    try {
+      const saved = await sbInsertReport(report);
+      db.cellReports.unshift(saved);
+      saveDB(db);
+      return saved;
+    } catch (e) { console.error("Report submit failed", e); }
+  }
+  const local = { id: "rpt_" + Date.now(), created_at: new Date().toISOString(), ...report };
+  db.cellReports.unshift(local);
+  saveDB(db);
+  return local;
+}
+
+export async function updateReport(id, patch) {
+  const db = getDB();
+  const r = (db.cellReports || []).find((x) => x.id === id);
+  if (r) Object.assign(r, patch);
+  saveDB(db);
+  if (supabaseEnabled) {
+    try { await sbUpdateReport(id, patch); } catch (e) { console.error("Report update failed", e); }
+  }
+}

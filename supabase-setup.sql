@@ -202,3 +202,39 @@ end $$;
 --  3. Deploy. The app auto-detects Supabase and switches from
 --     browser-only storage to the shared cloud database.
 -- ============================================================
+
+-- ============================================================
+--  CELL REPORTS  (added in the reporting build)
+--  Weekly home-cell reports submitted by cell leaders.
+--  Run this block in the SQL Editor if you set up your DB
+--  before this feature existed.
+-- ============================================================
+create table if not exists cell_reports (
+  id uuid primary key default gen_random_uuid(),
+  church_id uuid references churches(id) on delete cascade,
+  leader_id uuid references people(id) on delete set null,
+  leader_name text,
+  week_of date,                 -- the Sunday (or chosen date) the report covers
+  report_date date,             -- actual date the cell held
+  topic text,
+  adults int default 0,
+  children int default 0,
+  mvps_present text[],          -- ids of assigned newcomers present
+  mvps_present_names text[],    -- names snapshot for the report
+  offering numeric default 0,
+  dca int default 0,            -- attendees currently in Dominion City Academy
+  dli int default 0,            -- attendees currently in Leadership Institute
+  comment text,
+  offering_remitted boolean default false,
+  remitted_at timestamptz,
+  remitted_note text,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_reports_church on cell_reports(church_id);
+create index if not exists idx_reports_leader on cell_reports(leader_id);
+create index if not exists idx_reports_week on cell_reports(week_of);
+
+alter table cell_reports enable row level security;
+drop policy if exists "anon_all_cell_reports" on cell_reports;
+create policy "anon_all_cell_reports" on cell_reports for all using (true) with check (true);

@@ -12,7 +12,7 @@ export const LOCATION_DATA = {
       "Dutse Alhaji": ["Sokale", "Gidan Bawa", "Dutse Express Area", "Shishinpe", "Tungan Sarkin", "Behind Mission School Zone 1"],
       "Dutse Obasanjo Road": ["Freedom Avenue", "Mama Baby Area", "Obasanjo Rd Extension", "Obasanjo Close", "Mountain Side Layout", "First Transformer Street", "Data Set", "Uphill"],
       "Dutse Police Signboard": ["Signboard Area", "Tungan Signboard", "Signboard Extension"],
-      "Dutse Sokale": ["Sokale Main", "Sokale Phase 2", "Sokale Low Cost", "Sokale Extension", "Gidan Bawa (Sokale)", "First Transformer", "First High Tension", "Dura Garden"],
+      "Dutse Sokale": ["Sokale Main", "Sokale Phase 2", "Sokale Low Cost", "Sokale Extension", "Gidan Bawa (Sokale)", "First Transformer", "First High Tension", "Dura Garden", "Chief Palace Road"],
       "Dutse Tipper Garage": ["Tipper Garage Area", "Mechanics Quarter", "Rugan Mota", "Tasty Plus Restaurant Area"],
       "Dutse Makarantar": ["Old Dutse Village", "Makarantar Quarters", "Gidan Pawa", "Close to Mesuya Junction"],
       "Bamko": ["Bamko Phase 1", "Bamko Phase 2", "Bamko Extension", "Donabayi"],
@@ -26,7 +26,7 @@ export const LOCATION_DATA = {
     label: "Bwari", color: "#3b82f6",
     subs: {
       "Bwari Central": ["Bwari Town", "Bazango", "Galuwyi", "Gaba", "Gudupe", "Gutpo", "Sagwari"],
-      "Kubwa": ["Kubwa Phase 1", "Kubwa Phase 2", "Kubwa Phase 3", "Kubwa Phase 4", "Dei-Dei", "Sabon Gari Kubwa", "Tudun Wada"],
+      "Kubwa": ["Kubwa Phase 1", "Kubwa Phase 2", "Kubwa Phase 3", "Kubwa Phase 4", "Dei-Dei", "Sabon Gari Kubwa", "Tudun Wada", "Army Estate"],
       "Byazhin": ["Byazhi", "Chikale", "Simape", "Sumpe"],
       "Ushafa Ward": ["Ushafa", "Kogo", "Jigo", "Pamba", "Peyi", "Yaupe", "Tokulo"],
       "Igu": ["Igu", "Kaima", "Karaku", "Karawa", "Kasaru", "Kawadashi", "Piko"],

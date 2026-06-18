@@ -1,13 +1,22 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { CHURCH } from "../data/church.config.js";
 import { DEPARTMENTS } from "../data/seed.js";
-import { getDB, saveDB, logAction, updatePersonInCloud, supabaseEnabled } from "../lib/storage.js";
+import { getDB, saveDB, logAction, updatePersonInCloud, supabaseEnabled, submitReport, loadReports } from "../lib/storage.js";
 import { computeStatus, followupOverdue, hoursSinceSubmit, sundaysAbsent } from "../lib/logic.js";
 import { waLink, newcomerWelcomeMsg, membershipMsg } from "../lib/notifications.js";
+
+// Get the Sunday of the current week (week anchor for reports)
+function currentWeekSunday() {
+  const d = new Date();
+  const day = d.getDay();
+  d.setDate(d.getDate() - day); // back to Sunday
+  return d.toISOString().split("T")[0];
+}
 
 export default function CellLeaderPage({ db, refreshDB, auth, setAuth }) {
   const [login, setLogin] = useState({ phone: "", pin: "" });
   const [err, setErr] = useState("");
+  const [mode, setMode] = useState("people"); // people | report
   const [innerTab, setInnerTab] = useState("assigned");
   const [selected, setSelected] = useState(null);
   const [attendDate, setAttendDate] = useState(new Date().toISOString().split("T")[0]);
@@ -103,6 +112,14 @@ export default function CellLeaderPage({ db, refreshDB, auth, setAuth }) {
         <button className="btn-secondary" onClick={() => setAuth((a) => ({ ...a, cellLeader: null }))}>Logout</button>
       </div>
 
+      <div className="tab-bar" style={{ marginBottom: 20 }}>
+        <button className={"tab-btn" + (mode === "people" ? " active" : "")} onClick={() => setMode("people")}>👥 My People</button>
+        <button className={"tab-btn" + (mode === "report" ? " active" : "")} onClick={() => setMode("report")}>📋 Cell Reports</button>
+      </div>
+
+      {mode === "report" && <CellReportView leader={leader} db={db} mine={mine} refreshDB={refreshDB} />}
+
+      {mode === "people" && <>
       {overdue.length > 0 && (
         <div className="notice notice-danger" style={{ marginBottom: 16 }}>
           ⏰ {overdue.length} {overdue.length === 1 ? "person has" : "people have"} not been contacted within {CHURCH.followupSLAHours}h. Please reach out today.
@@ -155,6 +172,7 @@ export default function CellLeaderPage({ db, refreshDB, auth, setAuth }) {
           </div>
         );
       })}
+      </>}
 
       {selected && (
         <DetailPanel nc={selected} leader={leader} onClose={() => setSelected(null)} onAttend={markAttendance} onContact={markContacted} onWhatsApp={markWhatsApp} />
@@ -245,5 +263,181 @@ function DetailPanel({ nc, leader, onClose, onAttend, onContact, onWhatsApp }) {
         </button>
       </div>
     </div>
+  );
+}
+
+// ============================================================
+//  CELL REPORT VIEW (cell leader's own interface)
+//  Submit weekly report + see history + offering owed.
+// ============================================================
+function CellReportView({ leader, db, mine, refreshDB }) {
+  const [tab, setTab] = useState("submit");
+  const blank = {
+    report_date: new Date().toISOString().split("T")[0],
+    topic: "", adults: 0, children: 0,
+    mvps: [], offering: 0, dca: 0, dli: 0, comment: "",
+  };
+  const [f, setF] = useState(blank);
+  const [done, setDone] = useState(false);
+
+  useEffect(() => { if (supabaseEnabled) loadReports().then(() => refreshDB()); }, []);
+
+  const myReports = (db.cellReports || []).filter((r) => r.leader_id === leader.id || r.leader_name === leader.name);
+
+  const toggleMvp = (id) => setF((x) => ({ ...x, mvps: x.mvps.includes(id) ? x.mvps.filter((m) => m !== id) : [...x.mvps, id] }));
+
+  const submit = async () => {
+    if (!f.topic.trim()) return alert("Please enter the cell topic.");
+    const weekSunday = currentWeekSunday();
+    const mvpNames = f.mvps.map((id) => mine.find((m) => m.id === id)?.name).filter(Boolean);
+    const report = {
+      leader_id: leader.id, leader_name: leader.name,
+      week_of: weekSunday, report_date: f.report_date,
+      topic: f.topic,
+      adults: Number(f.adults) || 0, children: Number(f.children) || 0,
+      mvps_present: f.mvps, mvps_present_names: mvpNames,
+      offering: Number(f.offering) || 0,
+      dca: Number(f.dca) || 0, dli: Number(f.dli) || 0,
+      comment: f.comment, offering_remitted: false,
+    };
+    await submitReport(report);
+    logAction("cell_report_submitted", `${leader.name} for week ${weekSunday}`, leader.name);
+    refreshDB();
+    setF(blank); setDone(true);
+    setTimeout(() => setDone(false), 4000);
+  };
+
+  // Offering owed = sum of unremitted offerings
+  const owed = myReports.filter((r) => !r.offering_remitted).reduce((s, r) => s + (Number(r.offering) || 0), 0);
+  const totalGenerated = myReports.reduce((s, r) => s + (Number(r.offering) || 0), 0);
+  const fmt = (n) => "₦" + Number(n || 0).toLocaleString();
+
+  const alreadyThisWeek = myReports.some((r) => r.week_of === currentWeekSunday());
+
+  return (
+    <>
+      <div className="tab-bar" style={{ marginBottom: 18 }}>
+        <button className={"tab-btn" + (tab === "submit" ? " active" : "")} onClick={() => setTab("submit")}>✍️ Submit Report</button>
+        <button className={"tab-btn" + (tab === "history" ? " active" : "")} onClick={() => setTab("history")}>📚 My Reports ({myReports.length})</button>
+        <button className={"tab-btn" + (tab === "offering" ? " active" : "")} onClick={() => setTab("offering")}>💰 Offering</button>
+      </div>
+
+      {tab === "submit" && (
+        <>
+          {done && <div className="notice" style={{ marginBottom: 16 }}>✅ Report submitted — thank you! Your admin can now see it.</div>}
+          {alreadyThisWeek && !done && <div className="notice notice-warn" style={{ marginBottom: 16 }}>📌 You've already submitted for this week. Submitting again adds another entry (e.g. if your cell met more than once).</div>}
+          <div className="form-card">
+            <div className="form-section-title">Weekly Home Cell Report</div>
+            <div className="info-badge" style={{ marginBottom: 16 }}>Leader: <span>{leader.name}</span></div>
+
+            <div className="form-grid-2">
+              <div className="form-group">
+                <label className="form-label">Date Cell Held *</label>
+                <input type="date" className="form-input" value={f.report_date} onChange={(e) => setF((x) => ({ ...x, report_date: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Cell Topic *</label>
+                <input className="form-input" placeholder="e.g. Walking in Faith" value={f.topic} onChange={(e) => setF((x) => ({ ...x, topic: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginTop: 14 }}>
+              <label className="form-label">Attendance</label>
+              <div className="form-grid-2">
+                <div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Adults</div>
+                  <input type="number" min="0" className="form-input" value={f.adults} onChange={(e) => setF((x) => ({ ...x, adults: e.target.value }))} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Children</div>
+                  <input type="number" min="0" className="form-input" value={f.children} onChange={(e) => setF((x) => ({ ...x, children: e.target.value }))} />
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 6 }}>Total present: {(Number(f.adults) || 0) + (Number(f.children) || 0)}</div>
+            </div>
+
+            <div className="form-group" style={{ marginTop: 14 }}>
+              <label className="form-label">MVPs Present (newcomers assigned to you who attended)</label>
+              {mine.length === 0 && <div style={{ fontSize: 12, color: "var(--text-dim)" }}>No one is assigned to you yet.</div>}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                {mine.map((m) => (
+                  <button key={m.id} className={"toggle-btn" + (f.mvps.includes(m.id) ? " selected" : "")} onClick={() => toggleMvp(m.id)} style={{ fontSize: 12, padding: "8px 14px" }}>
+                    {f.mvps.includes(m.id) ? "✓ " : ""}{m.name}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 6 }}>{f.mvps.length} selected</div>
+            </div>
+
+            <div className="form-grid-2" style={{ marginTop: 14 }}>
+              <div className="form-group">
+                <label className="form-label">Offering Generated (₦)</label>
+                <input type="number" min="0" className="form-input" placeholder="0" value={f.offering} onChange={(e) => setF((x) => ({ ...x, offering: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">On DCA / On DLI</label>
+                <div className="form-grid-2">
+                  <input type="number" min="0" className="form-input" placeholder="DCA" value={f.dca} onChange={(e) => setF((x) => ({ ...x, dca: e.target.value }))} />
+                  <input type="number" min="0" className="form-input" placeholder="DLI" value={f.dli} onChange={(e) => setF((x) => ({ ...x, dli: e.target.value }))} />
+                </div>
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginTop: 14 }}>
+              <label className="form-label">Comments / Challenges / Testimonies (optional)</label>
+              <textarea className="form-input" rows={3} value={f.comment} onChange={(e) => setF((x) => ({ ...x, comment: e.target.value }))} style={{ resize: "vertical" }} />
+            </div>
+
+            <button className="btn-primary" style={{ marginTop: 16 }} onClick={submit}>✓ Submit This Week's Report</button>
+          </div>
+        </>
+      )}
+
+      {tab === "history" && (
+        <>
+          {myReports.length === 0 && <div style={{ color: "var(--text-dim)", textAlign: "center", padding: 32 }}>No reports submitted yet.</div>}
+          {myReports.map((r) => (
+            <div key={r.id} className="form-card" style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div className="serif" style={{ fontSize: 14, color: "var(--navy)", fontWeight: 700 }}>{r.topic}</div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>📅 {r.report_date} · Week of {r.week_of}</div>
+                </div>
+                <span className={"status-pill " + (r.offering_remitted ? "pill-member" : "pill-flagged")}>{r.offering_remitted ? "Remitted" : "Owing"}</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10, fontSize: 12, color: "var(--text-muted)" }}>
+                <span className="info-badge">👥 <span>{(r.adults || 0) + (r.children || 0)}</span> present</span>
+                <span className="info-badge">⭐ <span>{(r.mvps_present_names || []).length}</span> MVPs</span>
+                <span className="info-badge">💰 <span>{fmt(r.offering)}</span></span>
+                <span className="info-badge">DCA <span>{r.dca || 0}</span> · DLI <span>{r.dli || 0}</span></span>
+              </div>
+              {r.comment && <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, fontStyle: "italic" }}>"{r.comment}"</div>}
+            </div>
+          ))}
+        </>
+      )}
+
+      {tab === "offering" && (
+        <>
+          <div className="stat-grid">
+            <div className="stat-card"><div className="stat-num">{fmt(totalGenerated)}</div><div className="stat-label">Total Generated</div></div>
+            <div className="stat-card"><div className="stat-num" style={{ color: owed > 0 ? "var(--red)" : "var(--green)" }}>{fmt(owed)}</div><div className="stat-label">You Are Owing</div></div>
+            <div className="stat-card"><div className="stat-num" style={{ color: "var(--green)" }}>{fmt(totalGenerated - owed)}</div><div className="stat-label">Remitted</div></div>
+          </div>
+          {owed > 0 && <div className="notice notice-warn" style={{ marginBottom: 16 }}>💰 You have {fmt(owed)} in unremitted offering. Please remit to the church account and your admin will mark it.</div>}
+          {owed === 0 && myReports.length > 0 && <div className="notice" style={{ marginBottom: 16 }}>🎉 You're fully remitted — God bless you!</div>}
+          <div className="form-section-title" style={{ marginBottom: 12 }}>Week-by-week</div>
+          {myReports.map((r) => (
+            <div key={r.id} className="newcomer-row">
+              <div style={{ flex: 1 }}>
+                <div className="newcomer-name">{fmt(r.offering)}</div>
+                <div className="newcomer-meta">Week of {r.week_of} · {r.topic}</div>
+              </div>
+              <span className={"status-pill " + (r.offering_remitted ? "pill-member" : "pill-flagged")}>{r.offering_remitted ? "✓ Remitted" : "Owing"}</span>
+            </div>
+          ))}
+        </>
+      )}
+    </>
   );
 }

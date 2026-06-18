@@ -1,8 +1,8 @@
 import { useState, useRef } from "react";
-import { CHURCH, ADMIN_PIN } from "../data/church.config.js";
+import { CHURCH, ADMIN_PIN, CELL_ADMIN_PIN, DEFAULT_CELL_ADMIN_TABS } from "../data/church.config.js";
 import { LOCATION_DATA, mergeLocations } from "../data/locations.js";
 import { DEPARTMENTS } from "../data/seed.js";
-import { getDB, saveDB, logAction, exportDB, importDB, resetDB, pushPersonToCloud, updatePersonInCloud, deletePersonFromCloud, supabaseEnabled } from "../lib/storage.js";
+import { getDB, saveDB, logAction, exportDB, importDB, resetDB, pushPersonToCloud, updatePersonInCloud, deletePersonFromCloud, supabaseEnabled, updateReport } from "../lib/storage.js";
 import { generateInsights, assignCellLeader, followupOverdue, upcomingBirthdays, toCSV, downloadFile } from "../lib/logic.js";
 import { waLink, smsLink, birthdayMsg, leaderDigestMsg, leaderAssignmentMsg, personalize, personalizedBirthdayMsg, mailtoLink, sendAutomated } from "../lib/notifications.js";
 
@@ -12,9 +12,20 @@ export default function AdminPage({ db, refreshDB, auth, setAuth }) {
   const [tab, setTab] = useState("dashboard");
   const fileRef = useRef();
 
+  // role: "super" (full) or "cell" (restricted). Stored on auth.adminRole.
+  const role = auth.adminRole || (auth.admin ? "super" : null);
+  // Which tabs a cell admin may see (super admin configures this in Settings)
+  const cellAdminTabs = db.cellAdminTabs || DEFAULT_CELL_ADMIN_TABS;
+
   const doLogin = () => {
-    if (login === ADMIN_PIN) { setAuth((a) => ({ ...a, admin: true })); setErr(""); logAction("admin_login", "Admin signed in", "admin"); }
-    else setErr("Incorrect admin PIN.");
+    if (login === ADMIN_PIN) {
+      setAuth((a) => ({ ...a, admin: true, adminRole: "super" })); setErr("");
+      logAction("admin_login", "Super admin signed in", "super-admin");
+    } else if (login === CELL_ADMIN_PIN) {
+      setAuth((a) => ({ ...a, admin: true, adminRole: "cell" })); setErr("");
+      setTab("dashboard");
+      logAction("admin_login", "Cell admin signed in", "cell-admin");
+    } else setErr("Incorrect PIN.");
   };
 
   if (!auth.admin) {
@@ -23,7 +34,7 @@ export default function AdminPage({ db, refreshDB, auth, setAuth }) {
         <div className="login-card">
           <div style={{ textAlign: "center", marginBottom: 20, fontSize: 24 }}>⚙️</div>
           <div className="login-title">Admin Access</div>
-          <div className="login-sub">Enter the admin PIN to continue</div>
+          <div className="login-sub">Enter your admin PIN to continue</div>
           <div className="form-group" style={{ marginBottom: 20 }}>
             <label className="form-label">Admin PIN</label>
             <input className="form-input" type="password" placeholder="••••" inputMode="numeric" value={login}
@@ -31,7 +42,7 @@ export default function AdminPage({ db, refreshDB, auth, setAuth }) {
           </div>
           {err && <div className="notice notice-danger" style={{ marginBottom: 14 }}>{err}</div>}
           <button className="btn-primary" onClick={doLogin}>Enter Admin Dashboard</button>
-          <p style={{ fontSize: 11, color: "var(--text-dim)", textAlign: "center", marginTop: 10 }}>Default PIN: {ADMIN_PIN}</p>
+          <p style={{ fontSize: 11, color: "var(--text-dim)", textAlign: "center", marginTop: 10 }}>Super admin & cell admin each have their own PIN.</p>
         </div>
       </div>
     );
@@ -89,49 +100,55 @@ export default function AdminPage({ db, refreshDB, auth, setAuth }) {
 
   const adminTabs = [
     ["dashboard", "📊 Dashboard"], ["report", "📈 Monthly Report"], ["cellperf", "🎯 Cell Performance"],
-    ["newcomers", "👥 All Records"], ["assignments", "🔗 Assignments"], ["broadcast", "📢 Broadcast"],
-    ["deptoversight", "🏛 Dept Oversight"], ["directory", "📖 Directory"], ["people", "➕ Add People"],
-    ["members", "🏅 Members"], ["pending", "🌱 Not Yet Members"], ["flagged", "🚩 Flagged"],
-    ["birthdays", "🎂 Birthdays"], ["leaders", "🧑‍💼 Cell Leaders"], ["locations", "📍 Locations"],
-    ["audit", "📜 Audit Log"], ["settings", "⚙️ Settings"],
+    ["weeklyreports", "📋 Weekly Reports"], ["newcomers", "👥 All Records"], ["assignments", "🔗 Assignments"],
+    ["broadcast", "📢 Broadcast"], ["deptoversight", "🏛 Dept Oversight"], ["directory", "📖 Directory"],
+    ["people", "➕ Add People"], ["members", "🏅 Members"], ["pending", "🌱 Not Yet Members"],
+    ["flagged", "🚩 Flagged"], ["birthdays", "🎂 Birthdays"], ["leaders", "🧑‍💼 Cell Leaders"],
+    ["locations", "📍 Locations"], ["audit", "📜 Audit Log"], ["settings", "⚙️ Settings"],
   ];
+  // Super admin sees everything; cell admin sees only permitted tabs.
+  const visibleTabs = role === "super" ? adminTabs : adminTabs.filter(([id]) => cellAdminTabs.includes(id));
+  const activeTab = visibleTabs.some(([id]) => id === tab) ? tab : "dashboard";
 
   return (
     <div className="page-wide">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 10 }}>
         <div>
           <h2 className="section-title">Admin Dashboard</h2>
-          <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>{CHURCH.name} {CHURCH.branch} · {CHURCH.leadPastor}</p>
+          <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>
+            {CHURCH.name} {CHURCH.branch} · {role === "super" ? "Super Admin" : "Cell Admin"}
+          </p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button className="btn-secondary" style={{ fontSize: 12 }} onClick={exportCSV}>⬇️ Export CSV</button>
-          <button className="btn-secondary" style={{ fontSize: 12 }} onClick={() => setAuth((a) => ({ ...a, admin: false }))}>Logout</button>
+          <button className="btn-secondary" style={{ fontSize: 12 }} onClick={() => setAuth((a) => ({ ...a, admin: false, adminRole: null }))}>Logout</button>
         </div>
       </div>
 
       <div className="tab-bar">
-        {adminTabs.map(([id, label]) => (
-          <button key={id} className={"tab-btn" + (tab === id ? " active" : "")} onClick={() => setTab(id)} style={{ flex: "0 0 auto" }}>{label}</button>
+        {visibleTabs.map(([id, label]) => (
+          <button key={id} className={"tab-btn" + (activeTab === id ? " active" : "")} onClick={() => setTab(id)} style={{ flex: "0 0 auto" }}>{label}</button>
         ))}
       </div>
 
-      {tab === "dashboard" && <Dashboard insights={insights} newcomers={newcomers} leaders={db.cellLeaders || []} />}
-      {tab === "report" && <MonthlyReport insights={insights} onExport={exportCSV} />}
-      {tab === "cellperf" && <CellPerformance db={db} newcomers={newcomers} />}
-      {tab === "newcomers" && <AllRecords newcomers={newcomers} onStatus={updateStatus} onDept={assignDept} onDelete={deleteNC} />}
-      {tab === "assignments" && <Assignments db={db} newcomers={newcomers} refreshDB={refreshDB} />}
-      {tab === "broadcast" && <Broadcast db={db} newcomers={newcomers} />}
-      {tab === "deptoversight" && <DeptOversight db={db} newcomers={newcomers} onAssignHead={assignDept} />}
-      {tab === "directory" && <Directory db={db} newcomers={newcomers} refreshDB={refreshDB} />}
-      {tab === "people" && <AddPeople db={db} refreshDB={refreshDB} />}
-      {tab === "members" && <Members members={members} leadership={db.leadership || []} onAssignDept={assignDept} />}
-      {tab === "pending" && <NotYetMembers newcomers={newcomers} />}
-      {tab === "flagged" && <Flagged newcomers={newcomers} />}
-      {tab === "birthdays" && <Birthdays />}
-      {tab === "leaders" && <Leaders db={db} newcomers={newcomers} refreshDB={refreshDB} />}
-      {tab === "locations" && <Locations db={db} refreshDB={refreshDB} />}
-      {tab === "audit" && <AuditLog log={db.auditLog || []} />}
-      {tab === "settings" && <Settings db={db} fileRef={fileRef} onBackup={exportBackup} onImport={handleImport} refreshDB={refreshDB} />}
+      {activeTab === "dashboard" && <Dashboard insights={insights} newcomers={newcomers} leaders={db.cellLeaders || []} />}
+      {activeTab === "report" && <MonthlyReport insights={insights} onExport={exportCSV} />}
+      {activeTab === "cellperf" && <CellPerformance db={db} newcomers={newcomers} />}
+      {activeTab === "weeklyreports" && <WeeklyReports db={db} refreshDB={refreshDB} />}
+      {activeTab === "newcomers" && <AllRecords newcomers={newcomers} onStatus={updateStatus} onDept={assignDept} onDelete={deleteNC} />}
+      {activeTab === "assignments" && <Assignments db={db} newcomers={newcomers} refreshDB={refreshDB} />}
+      {activeTab === "broadcast" && <Broadcast db={db} newcomers={newcomers} />}
+      {activeTab === "deptoversight" && <DeptOversight db={db} newcomers={newcomers} onAssignHead={assignDept} />}
+      {activeTab === "directory" && <Directory db={db} newcomers={newcomers} refreshDB={refreshDB} />}
+      {activeTab === "people" && <AddPeople db={db} refreshDB={refreshDB} />}
+      {activeTab === "members" && <Members members={members} leadership={db.leadership || []} onAssignDept={assignDept} />}
+      {activeTab === "pending" && <NotYetMembers newcomers={newcomers} />}
+      {activeTab === "flagged" && <Flagged newcomers={newcomers} />}
+      {activeTab === "birthdays" && <Birthdays />}
+      {activeTab === "leaders" && <Leaders db={db} newcomers={newcomers} refreshDB={refreshDB} />}
+      {activeTab === "locations" && <Locations db={db} refreshDB={refreshDB} />}
+      {activeTab === "audit" && <AuditLog log={db.auditLog || []} />}
+      {activeTab === "settings" && <Settings db={db} fileRef={fileRef} onBackup={exportBackup} onImport={handleImport} refreshDB={refreshDB} role={role} cellAdminTabs={cellAdminTabs} allTabs={adminTabs} />}
     </div>
   );
 }
@@ -1271,34 +1288,64 @@ function AuditLog({ log }) {
   );
 }
 
-function Settings({ db, fileRef, onBackup, onImport, refreshDB }) {
+function Settings({ db, fileRef, onBackup, onImport, refreshDB, role, cellAdminTabs, allTabs }) {
   const handleReset = () => { if (confirm("Reset ALL data? This cannot be undone.")) { resetDB(); refreshDB(); } };
+
+  // Cell-admin permission toggles (super admin only). dashboard is always on.
+  const toggleTab = (id) => {
+    const curr = getDB();
+    const current = curr.cellAdminTabs || cellAdminTabs;
+    const next = current.includes(id) ? current.filter((t) => t !== id) : [...current, id];
+    if (!next.includes("dashboard")) next.push("dashboard"); // always keep dashboard
+    curr.cellAdminTabs = next;
+    saveDB(curr); logAction("permissions_changed", `Cell admin tabs: ${next.join(", ")}`, "super-admin"); refreshDB();
+  };
+  const effectiveTabs = db.cellAdminTabs || cellAdminTabs;
+
   return (
     <div className="form-card">
       <div className="form-section-title">⚙️ Platform Settings</div>
       <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.9 }}>
         <p>🏠 <strong style={{ color: "var(--text)" }}>Address:</strong> {CHURCH.address}</p>
         <p>👨‍💼 <strong style={{ color: "var(--text)" }}>Lead Pastor:</strong> {CHURCH.leadPastor}</p>
-        <p>👩‍💼 <strong style={{ color: "var(--text)" }}>Pastor's Wife:</strong> {CHURCH.pastorWife}</p>
         <p>📅 <strong style={{ color: "var(--text)" }}>Services:</strong> {CHURCH.services.map((s) => `${s.day} ${s.time}`).join(" · ")}</p>
         <p>🎯 <strong style={{ color: "var(--text)" }}>Membership threshold:</strong> {CHURCH.membershipThreshold} services</p>
       </div>
 
-      <div style={{ display: "flex", gap: 10, margin: "20px 0", flexWrap: "wrap" }}>
-        <button className="btn-secondary" onClick={onBackup}>💾 Download Backup (JSON)</button>
-        <button className="btn-secondary" onClick={() => fileRef.current?.click()}>📂 Restore from Backup</button>
-        <input ref={fileRef} type="file" accept=".json" style={{ display: "none" }} onChange={onImport} />
-        <button className="btn-danger" style={{ padding: "10px 16px" }} onClick={handleReset}>🗑️ Reset All Data</button>
-      </div>
+      {role === "super" && (
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+          <div className="form-section-title">🔐 Cell Admin Permissions</div>
+          <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12, lineHeight: 1.6 }}>
+            Choose which tabs the <strong>Cell Admin</strong> can see. The Super Admin always sees everything. Sensitive tabs (Assignments, Locations, Audit, Settings) are off by default so cell admins can't alter core data.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {allTabs.filter(([id]) => id !== "settings").map(([id, label]) => (
+              <button key={id} className={"toggle-btn" + (effectiveTabs.includes(id) ? " selected" : "")} onClick={() => toggleTab(id)} style={{ fontSize: 12, padding: "7px 12px" }} disabled={id === "dashboard"}>
+                {effectiveTabs.includes(id) ? "✓ " : ""}{label}
+              </button>
+            ))}
+          </div>
+          <p style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 10 }}>Settings is super-admin only and can't be granted. Dashboard is always on.</p>
+        </div>
+      )}
 
-      <div className="notice notice-warn" style={{ marginBottom: 12 }}>
-        💡 <strong>WhatsApp/SMS:</strong> The app currently uses tap-to-send WhatsApp links (zero cost — works now). For fully automatic messages, connect a Twilio or WhatsApp Cloud API key in the backend <code style={{ fontSize: 11 }}>.env</code> file.
+      {role === "super" && (
+        <div style={{ display: "flex", gap: 10, margin: "20px 0", flexWrap: "wrap" }}>
+          <button className="btn-secondary" onClick={onBackup}>💾 Download Backup (JSON)</button>
+          <button className="btn-secondary" onClick={() => fileRef.current?.click()}>📂 Restore from Backup</button>
+          <input ref={fileRef} type="file" accept=".json" style={{ display: "none" }} onChange={onImport} />
+          <button className="btn-danger" style={{ padding: "10px 16px" }} onClick={handleReset}>🗑️ Reset All Data</button>
+        </div>
+      )}
+
+      <div className="notice notice-warn" style={{ marginTop: 16, marginBottom: 12 }}>
+        🔑 <strong>Two admin PINs:</strong> Super Admin (full access) and Cell Admin (restricted to the tabs above). Change both in <code style={{ fontSize: 11 }}>src/data/church.config.js</code> before going public.
       </div>
-      <div className="notice" style={{ marginBottom: 12 }}>
-        📶 <strong>Offline Mode:</strong> All data saves locally and syncs when internet returns. ({(db.syncQueue || []).filter((q) => !q.synced).length} items pending sync)
+      <div className="notice notice-warn" style={{ marginBottom: 12 }}>
+        💡 <strong>Messaging:</strong> Tap-to-send WhatsApp/SMS/email works now (free). For automatic sending, connect a provider in the backend <code style={{ fontSize: 11 }}>.env</code>.
       </div>
       <div className="notice" style={{ marginBottom: 0 }}>
-        🖼️ <strong>Logo:</strong> Place your church logo at <code style={{ fontSize: 11 }}>public/church-logo.png</code> — it appears everywhere automatically. To rebrand for another church, edit <code style={{ fontSize: 11 }}>src/data/church.config.js</code>.
+        🖼️ <strong>Logo & rebrand:</strong> Logo at <code style={{ fontSize: 11 }}>public/church-logo.png</code>; church details in <code style={{ fontSize: 11 }}>src/data/church.config.js</code>.
       </div>
     </div>
   );
@@ -1355,7 +1402,7 @@ function CellPerformance({ db, newcomers }) {
   return (
     <>
       <div className="notice" style={{ marginBottom: 16 }}>
-        🎯 A snapshot for the Pastor: every cell leader, how many souls they oversee, and exactly where each stands. Tap any leader to see their full list. Use search to jump straight to a person or a leader.
+        🎯 A snapshot for the Pastor: every cell leader, how many souls they oversee, and exactly where each stands. Tap any leader to see their full list. Use search to jump straight to a person or a leader. For weekly home-cell reports & offering, see the <strong>📋 Weekly Reports</strong> tab.
       </div>
 
       <div className="stat-grid" style={{ marginBottom: 16 }}>
@@ -1677,4 +1724,177 @@ function DeptOversight({ db, newcomers, onAssignHead }) {
       {byDept.length === 0 && <div style={{ color: "var(--text-dim)", textAlign: "center", padding: 32 }}>No members assigned to departments yet. Members get assigned once they reach {CHURCH.membershipThreshold} services.</div>}
     </>
   );
+}
+
+// ============================================================
+//  WEEKLY REPORTS (admin) — the pastor's compiled view
+//  Summaries first, then per-leader breakdowns. Tracks who
+//  submitted, offering remittance, and exports cleanly.
+// ============================================================
+function WeeklyReports({ db, refreshDB }) {
+  const reports = db.cellReports || [];
+  const leaders = db.cellLeaders || [];
+  const newcomers = db.newcomers || [];
+
+  // Build list of weeks present in the data (most recent first)
+  const weeks = [...new Set(reports.map((r) => r.week_of))].sort().reverse();
+  const [week, setWeek] = useState(weeks[0] || currentWeekSundayAdmin());
+  const [expanded, setExpanded] = useState(null);
+
+  const weekReports = reports.filter((r) => r.week_of === week);
+  const submittedLeaderIds = new Set(weekReports.map((r) => r.leader_id));
+  const notSubmitted = leaders.filter((l) => !submittedLeaderIds.has(l.id));
+
+  // Summary numbers for the chosen week
+  const sum = weekReports.reduce((acc, r) => {
+    acc.adults += Number(r.adults) || 0;
+    acc.children += Number(r.children) || 0;
+    acc.mvps += (r.mvps_present_names || []).length;
+    acc.offering += Number(r.offering) || 0;
+    acc.remitted += r.offering_remitted ? (Number(r.offering) || 0) : 0;
+    acc.dca += Number(r.dca) || 0;
+    acc.dli += Number(r.dli) || 0;
+    return acc;
+  }, { adults: 0, children: 0, mvps: 0, offering: 0, remitted: 0, dca: 0, dli: 0 });
+  const totalAttendance = sum.adults + sum.children;
+  const owing = sum.offering - sum.remitted;
+  const fmt = (n) => "₦" + Number(n || 0).toLocaleString();
+
+  const toggleRemit = async (r) => {
+    await updateReport(r.id, { offering_remitted: !r.offering_remitted, remitted_at: !r.offering_remitted ? new Date().toISOString() : null });
+    logAction("offering_remit", `${r.leader_name} week ${r.week_of} → ${!r.offering_remitted ? "remitted" : "unmarked"}`, "admin");
+    refreshDB();
+  };
+
+  const exportWeek = () => {
+    const headers = ["Leader", "Date Held", "Topic", "Adults", "Children", "Total", "MVPs Present", "Offering", "Remitted", "DCA", "DLI", "Comment"];
+    const rows = weekReports.map((r) => [
+      r.leader_name, r.report_date, r.topic, r.adults, r.children,
+      (Number(r.adults) || 0) + (Number(r.children) || 0),
+      (r.mvps_present_names || []).join("; "), r.offering, r.offering_remitted ? "Yes" : "No",
+      r.dca, r.dli, r.comment || "",
+    ]);
+    const csv = [headers, ...rows].map((row) => row.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    downloadFile(csv, `dc_dutse_weekly_report_${week}.csv`);
+    logAction("weekly_report_export", `Week ${week}`, "admin");
+  };
+
+  if (reports.length === 0) {
+    return (
+      <>
+        <div className="notice" style={{ marginBottom: 16 }}>📋 No cell reports submitted yet. Once cell leaders submit from their login, you'll see a beautiful weekly compilation here.</div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label">Week of (Sunday)</label>
+          <select className="form-input form-select" value={week} onChange={(e) => { setWeek(e.target.value); setExpanded(null); }} style={{ width: "auto" }}>
+            {weeks.map((w) => <option key={w} value={w}>{new Date(w).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</option>)}
+          </select>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn-secondary" onClick={exportWeek}>⬇️ Export Week (CSV)</button>
+          <button className="btn-secondary" onClick={() => window.print()}>🖨️ Print</button>
+        </div>
+      </div>
+
+      {/* SUMMARY FIRST */}
+      <div className="notice" style={{ marginBottom: 16 }}>
+        📋 Week of <strong>{new Date(week).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</strong> — {weekReports.length} of {leaders.length} cell leaders submitted.
+      </div>
+
+      <div className="stat-grid">
+        <div className="stat-card"><div className="stat-num">{weekReports.length}/{leaders.length}</div><div className="stat-label">Reports In</div></div>
+        <div className="stat-card"><div className="stat-num">{totalAttendance}</div><div className="stat-label">Total Attendance</div></div>
+        <div className="stat-card"><div className="stat-num" style={{ color: "var(--blue)" }}>{sum.adults}</div><div className="stat-label">Adults</div></div>
+        <div className="stat-card"><div className="stat-num" style={{ color: "var(--blue)" }}>{sum.children}</div><div className="stat-label">Children</div></div>
+        <div className="stat-card"><div className="stat-num" style={{ color: "var(--green)" }}>{sum.mvps}</div><div className="stat-label">MVPs Present</div></div>
+        <div className="stat-card"><div className="stat-num">{fmt(sum.offering)}</div><div className="stat-label">Total Offering</div></div>
+        <div className="stat-card"><div className="stat-num" style={{ color: owing > 0 ? "var(--red)" : "var(--green)" }}>{fmt(owing)}</div><div className="stat-label">Yet to Remit</div></div>
+        <div className="stat-card"><div className="stat-num">{sum.dca} · {sum.dli}</div><div className="stat-label">On DCA · DLI</div></div>
+      </div>
+
+      {/* NOT SUBMITTED — follow-up list */}
+      {notSubmitted.length > 0 && (
+        <div className="form-card" style={{ marginBottom: 16, borderColor: "#f4c9c9" }}>
+          <div className="form-section-title" style={{ color: "var(--red)", borderColor: "#f4c9c9" }}>⏰ Yet to Submit ({notSubmitted.length})</div>
+          {notSubmitted.map((l) => (
+            <div key={l.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>{l.name}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>📞 {l.phone} · {l.zone || "—"}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <a className="btn-wa" href={waLink(l.phone, `Hello ${l.name.split(" ")[0]}, please remember to submit your cell report for this week on the DC Connect app: ${CHURCH.appUrl} 🙏`)} target="_blank" rel="noreferrer" style={{ fontSize: 11, padding: "6px 10px" }}>💬 Remind</a>
+                <a className="btn-wa" href={`tel:${l.phone}`} style={{ fontSize: 11, padding: "6px 10px", background: "var(--blue-soft)", borderColor: "#d4e2fb", color: "var(--navy)" }}>📞</a>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* PER-LEADER BREAKDOWN */}
+      <div className="form-section-title" style={{ marginBottom: 12 }}>Submitted Reports</div>
+      {weekReports.map((r) => (
+        <div key={r.id} style={{ marginBottom: 10 }}>
+          <div className="newcomer-row" style={{ cursor: "pointer", marginBottom: 0 }} onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
+            <div style={{ flex: 1 }}>
+              <div className="newcomer-name">{r.leader_name}</div>
+              <div className="newcomer-meta">📖 {r.topic} · 📅 {r.report_date}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                <span className="info-badge">👥 <span>{(Number(r.adults) || 0) + (Number(r.children) || 0)}</span></span>
+                <span className="info-badge">⭐ <span>{(r.mvps_present_names || []).length}</span></span>
+                <span className="info-badge">💰 <span>{fmt(r.offering)}</span></span>
+                <span className={"status-pill " + (r.offering_remitted ? "pill-member" : "pill-flagged")}>{r.offering_remitted ? "✓ Remitted" : "Owing"}</span>
+              </div>
+            </div>
+            <div style={{ fontSize: 20, color: "var(--text-dim)" }}>{expanded === r.id ? "▾" : "▸"}</div>
+          </div>
+          {expanded === r.id && (
+            <div style={{ background: "var(--blue-soft)", border: "1px solid #d4e2fb", borderTop: "none", borderRadius: "0 0 12px 12px", padding: "14px 16px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+                {[["Adults", r.adults], ["Children", r.children], ["On DCA", r.dca], ["On DLI", r.dli]].map(([k, v]) => (
+                  <div key={k} style={{ background: "#fff", borderRadius: 8, padding: "8px 12px" }}>
+                    <div style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase" }}>{k}</div>
+                    <div style={{ fontSize: 14, color: "var(--navy)", fontWeight: 600 }}>{v || 0}</div>
+                  </div>
+                ))}
+              </div>
+              {(r.mvps_present_names || []).length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", marginBottom: 6 }}>MVPs Present</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {r.mvps_present_names.map((n) => <span key={n} style={{ background: "#fff", border: "1px solid #d4e2fb", borderRadius: 6, padding: "3px 9px", fontSize: 11, color: "var(--navy)" }}>{n}</span>)}
+                  </div>
+                </div>
+              )}
+              {r.comment && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", marginBottom: 4 }}>Comment</div>
+                  <div style={{ fontSize: 13, color: "var(--text)", fontStyle: "italic" }}>"{r.comment}"</div>
+                </div>
+              )}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, paddingTop: 10, borderTop: "1px solid #d4e2fb" }}>
+                <div style={{ fontSize: 13, color: "var(--navy)", fontWeight: 600 }}>Offering: {fmt(r.offering)}</div>
+                <button className={r.offering_remitted ? "btn-secondary" : "btn-primary"} style={{ width: "auto", fontSize: 12, padding: "8px 16px", margin: 0 }} onClick={() => toggleRemit(r)}>
+                  {r.offering_remitted ? "↩ Mark Unremitted" : "✓ Mark Remitted"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
+// helper used inside WeeklyReports (admin scope)
+function currentWeekSundayAdmin() {
+  const d = new Date();
+  d.setDate(d.getDate() - d.getDay());
+  return d.toISOString().split("T")[0];
 }

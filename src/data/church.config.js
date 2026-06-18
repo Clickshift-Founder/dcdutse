@@ -66,3 +66,15 @@ export const CHURCH = {
 
 // Admin PIN — CHANGE THIS, and ideally move to backend .env for production
 export const ADMIN_PIN = "1234";
+
+// Cell Admin PIN — a restricted admin (e.g. cell coordinator) who can view
+// reports and cell performance but not alter sensitive settings.
+// The super admin can change which tabs the cell admin sees, in Settings.
+export const CELL_ADMIN_PIN = "5678";
+
+// Default tabs a Cell Admin may access (super admin can edit in Settings).
+// Super admin always sees everything.
+export const DEFAULT_CELL_ADMIN_TABS = [
+  "dashboard", "report", "cellperf", "weeklyreports", "newcomers",
+  "directory", "members", "pending", "flagged", "birthdays",
+];

@@ -8,7 +8,7 @@ import { waLink, newcomerWelcomeMsg, leaderAssignmentMsg, deptInterestMsg } from
 import Logo from "../components/Logo.jsx";
 
 const EMPTY = {
-  name: "", phone: "", birthday: "", street: "",
+  name: "", phone: "", bMonth: "", bDay: "", bYear: "", street: "",
   area: "", sublocation: "", village: "",
   bornAgain: "", baptizedHG: "", baptizedWater: "",
   howCame: "", inviterName: "", mission: "",
@@ -45,8 +45,15 @@ export default function NewcomerPage({ refreshDB, isOnline }) {
 
   const handleSubmit = () => {
     const leader = assignCellLeader(form.area, form.sublocation, form.village, form.gender);
+    // Compose birthday: "YYYY-MM-DD" if year given, else "MM-DD" (year-less).
+    // Day/month must both be present for a birthday to be stored.
+    let birthday = "";
+    if (form.bMonth && form.bDay) {
+      birthday = form.bYear ? `${form.bYear}-${form.bMonth}-${form.bDay}` : `${form.bMonth}-${form.bDay}`;
+    }
     const record = {
       ...form,
+      birthday,
       id: "nc_" + Date.now(),
       status: "new",
       assignedLeader: leader,
@@ -186,8 +193,23 @@ export default function NewcomerPage({ refreshDB, isOnline }) {
               )}
             </div>
             <div className="form-group">
-              <label className="form-label">Birthday</label>
-              <input className="form-input" type="date" value={form.birthday} onChange={(e) => set("birthday", e.target.value)} />
+              <label className="form-label">Birthday <span style={{ textTransform: "none", color: "var(--text-dim)" }}>(year optional)</span></label>
+              <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr 1fr", gap: 8 }}>
+                <select className="form-input form-select" value={form.bMonth} onChange={(e) => set("bMonth", e.target.value)}>
+                  <option value="">Month</option>
+                  {["January","February","March","April","May","June","July","August","September","October","November","December"].map((m, i) => (
+                    <option key={m} value={String(i + 1).padStart(2, "0")}>{m}</option>
+                  ))}
+                </select>
+                <select className="form-input form-select" value={form.bDay} onChange={(e) => set("bDay", e.target.value)} disabled={!form.bMonth}>
+                  <option value="">Day</option>
+                  {Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0")).map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
+                <select className="form-input form-select" value={form.bYear} onChange={(e) => set("bYear", e.target.value)}>
+                  <option value="">Year –</option>
+                  {Array.from({ length: 90 }, (_, i) => new Date().getFullYear() - i).map((y) => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </div>
             </div>
           </div>
           <div className="form-grid-2">

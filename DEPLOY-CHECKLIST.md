@@ -57,3 +57,22 @@ This is the login link cell leaders receive in their WhatsApp digest.
 ## Demo logins (seed data, only shows when Supabase is NOT connected)
 - Cell Leader: phone `08012345601`, PIN `5601`
 - Admin: PIN `1234`
+
+---
+
+## UPDATE: Cell Reports feature (run this once)
+If your Supabase DB was created before the reporting feature, open the SQL Editor
+and run the `cell_reports` block at the bottom of `supabase-setup.sql`. New setups
+already include it.
+
+## Two admin PINs
+- **Super Admin** (full access): PIN `1234` — change in `src/data/church.config.js`
+- **Cell Admin** (restricted): PIN `5678` — change in the same file
+The Super Admin chooses which tabs the Cell Admin sees under Settings → Cell Admin Permissions.
+By default the Cell Admin can view reports, cell performance, and members, but NOT
+Assignments, Locations, Audit, Broadcast, or Settings.
+
+## Cell leaders submitting reports
+Cell leaders log in (phone + last-4-digits PIN), tap **📋 Cell Reports**, and submit
+the weekly form. Admins see the compiled view under **📋 Weekly Reports**, mark offerings
+remitted, and chase anyone who hasn't submitted.
