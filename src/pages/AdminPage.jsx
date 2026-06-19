@@ -6,6 +6,12 @@ import { getDB, saveDB, logAction, exportDB, importDB, resetDB, pushPersonToClou
 import { generateInsights, assignCellLeader, followupOverdue, upcomingBirthdays, toCSV, downloadFile } from "../lib/logic.js";
 import { waLink, smsLink, birthdayMsg, leaderDigestMsg, leaderAssignmentMsg, personalize, personalizedBirthdayMsg, mailtoLink, sendAutomated } from "../lib/notifications.js";
 
+// A leader's representative neighbourhood = their first/most-precise coverage tag.
+// Tracking happens at neighbourhood level (church is in Dutse Main zone).
+function leaderHood(l) {
+  return (l.areas || [])[0] || l.zone || "—";
+}
+
 export default function AdminPage({ db, refreshDB, auth, setAuth }) {
   const [login, setLogin] = useState("");
   const [err, setErr] = useState("");
@@ -1077,7 +1083,7 @@ function Leaders({ db, newcomers, refreshDB }) {
           <div key={l.id} className="newcomer-row">
             <div style={{ flex: 1 }}>
               <div className="newcomer-name">{l.name} {l.gender && <span style={{ fontSize: 11, color: l.gender === "Female" ? "#db2777" : "var(--blue)" }}>· {l.gender}</span>} {l.roles?.includes("zonalPastor") && <span style={{ fontSize: 10, color: "var(--purple)" }}>· Zonal Pastor</span>}</div>
-              <div className="newcomer-meta">📞 {l.phone}{l.email ? ` · ✉️ ${l.email}` : ""} · Zone: {l.zone || "—"}</div>
+              <div className="newcomer-meta">📞 {l.phone}{l.email ? ` · ✉️ ${l.email}` : ""} · 📍 {leaderHood(l)}</div>
               <div className="newcomer-meta">Covers: {(l.areas || []).join(", ") || "⚠️ no locations set"}</div>
               <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>Login PIN: {l.phone.slice(-4)} · {newcomers.filter((n) => n.assignedLeader?.id === l.id).length} assigned</div>
             </div>
@@ -1402,7 +1408,7 @@ function CellPerformance({ db, newcomers }) {
   return (
     <>
       <div className="notice" style={{ marginBottom: 16 }}>
-        🎯 A snapshot for the Pastor: every cell leader, how many souls they oversee, and exactly where each stands. Tap any leader to see their full list. Use search to jump straight to a person or a leader. For weekly home-cell reports & offering, see the <strong>📋 Weekly Reports</strong> tab.
+        🎯 A snapshot for the Pastor: every cell leader, how many souls they oversee, and exactly where each stands. Tap any leader to see their full list. Use search to jump straight to a person or a leader. For weekly home-cell reports & offering, see the <strong>📋 Weekly Reports</strong> tab. <em>"Not contacted" means the leader hasn't yet marked attendance or reached out to that soul in the app.</em>
       </div>
 
       <div className="stat-grid" style={{ marginBottom: 16 }}>
@@ -1442,7 +1448,7 @@ function CellPerformance({ db, newcomers }) {
           <div className="newcomer-row" style={{ cursor: "pointer", marginBottom: 0 }} onClick={() => setExpanded(expanded === leader.id ? null : leader.id)}>
             <div style={{ flex: 1 }}>
               <div className="newcomer-name">{leader.name} {overdue > 0 && <span style={{ fontSize: 11, color: "var(--red)" }}>⏰ {overdue} overdue</span>}</div>
-              <div className="newcomer-meta">📞 {leader.phone} · {leader.zone || "—"}</div>
+              <div className="newcomer-meta">📞 {leader.phone} · 📍 {leaderHood(leader)}</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                 <span className="status-pill" style={{ background: "var(--blue-soft)", color: "var(--navy)", border: "1px solid #d4e2fb" }}>{total} total</span>
                 {pending > 0 && <span className="status-pill pill-new">{pending} pending</span>}
@@ -1745,6 +1751,10 @@ function WeeklyReports({ db, refreshDB }) {
   const submittedLeaderIds = new Set(weekReports.map((r) => r.leader_id));
   const notSubmitted = leaders.filter((l) => !submittedLeaderIds.has(l.id));
 
+  // Helper: find a leader's gender / neighbourhood from the leaders list
+  const leaderOf = (r) => leaders.find((l) => l.id === r.leader_id) || {};
+  const leaderNeighbourhood = (l) => leaderHood(l);
+
   // Summary numbers for the chosen week
   const sum = weekReports.reduce((acc, r) => {
     acc.adults += Number(r.adults) || 0;
@@ -1754,11 +1764,19 @@ function WeeklyReports({ db, refreshDB }) {
     acc.remitted += r.offering_remitted ? (Number(r.offering) || 0) : 0;
     acc.dca += Number(r.dca) || 0;
     acc.dli += Number(r.dli) || 0;
+    acc.soulsWon += Number(r.souls_won) || 0;
+    acc.soulsVisited += Number(r.souls_visited) || 0;
+    acc.cellMvp += Number(r.cell_mvp) || 0;
     return acc;
-  }, { adults: 0, children: 0, mvps: 0, offering: 0, remitted: 0, dca: 0, dli: 0 });
+  }, { adults: 0, children: 0, mvps: 0, offering: 0, remitted: 0, dca: 0, dli: 0, soulsWon: 0, soulsVisited: 0, cellMvp: 0 });
   const totalAttendance = sum.adults + sum.children;
   const owing = sum.offering - sum.remitted;
   const fmt = (n) => "₦" + Number(n || 0).toLocaleString();
+
+  // How many MALE vs FEMALE leaders held their home cell (submitted a report)
+  const submittedLeaders = weekReports.map((r) => leaderOf(r));
+  const maleSubmitted = submittedLeaders.filter((l) => (l.gender || "").toLowerCase() === "male").length;
+  const femaleSubmitted = submittedLeaders.filter((l) => (l.gender || "").toLowerCase() === "female").length;
 
   const toggleRemit = async (r) => {
     await updateReport(r.id, { offering_remitted: !r.offering_remitted, remitted_at: !r.offering_remitted ? new Date().toISOString() : null });
@@ -1767,12 +1785,21 @@ function WeeklyReports({ db, refreshDB }) {
   };
 
   const exportWeek = () => {
-    const headers = ["Leader", "Date Held", "Topic", "Adults", "Children", "Total", "MVPs Present", "Offering", "Remitted", "DCA", "DLI", "Comment"];
-    const rows = weekReports.map((r) => [
-      r.leader_name, r.report_date, r.topic, r.adults, r.children,
-      (Number(r.adults) || 0) + (Number(r.children) || 0),
-      (r.mvps_present_names || []).join("; "), r.offering, r.offering_remitted ? "Yes" : "No",
-      r.dca, r.dli, r.comment || "",
+    const headers = ["Leader", "Gender", "Neighbourhood", "Date Held", "Topic", "Adults", "Children", "Total", "MVPs Present (names)", "MVPs Count", "Cell MVP", "Souls Won", "Souls Visited", "On DCA", "On DLI", "Offering", "Remitted", "Comment"];
+    const rows = weekReports.map((r) => {
+      const l = leaderOf(r);
+      return [
+        r.leader_name, l.gender || "", leaderNeighbourhood(l), r.report_date, r.topic,
+        r.adults || 0, r.children || 0, (Number(r.adults) || 0) + (Number(r.children) || 0),
+        (r.mvps_present_names || []).join("; "), (r.mvps_present_names || []).length,
+        r.cell_mvp || 0, r.souls_won || 0, r.souls_visited || 0,
+        r.dca || 0, r.dli || 0, r.offering || 0, r.offering_remitted ? "Yes" : "No", r.comment || "",
+      ];
+    });
+    // Append a totals row
+    rows.push([
+      "TOTAL", "", "", "", "", sum.adults, sum.children, totalAttendance,
+      "", sum.mvps, sum.cellMvp, sum.soulsWon, sum.soulsVisited, sum.dca, sum.dli, sum.offering, "", "",
     ]);
     const csv = [headers, ...rows].map((row) => row.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     downloadFile(csv, `dc_dutse_weekly_report_${week}.csv`);
@@ -1804,18 +1831,24 @@ function WeeklyReports({ db, refreshDB }) {
 
       {/* SUMMARY FIRST */}
       <div className="notice" style={{ marginBottom: 16 }}>
-        📋 Week of <strong>{new Date(week).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</strong> — {weekReports.length} of {leaders.length} cell leaders submitted.
+        📋 Week of <strong>{new Date(week).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</strong> — {weekReports.length} of {leaders.length} cell leaders held their home cell &amp; submitted ({maleSubmitted} male, {femaleSubmitted} female).
       </div>
 
       <div className="stat-grid">
         <div className="stat-card"><div className="stat-num">{weekReports.length}/{leaders.length}</div><div className="stat-label">Reports In</div></div>
+        <div className="stat-card"><div className="stat-num" style={{ color: "var(--blue)" }}>{maleSubmitted}</div><div className="stat-label">Male Leaders Held</div></div>
+        <div className="stat-card"><div className="stat-num" style={{ color: "#db2777" }}>{femaleSubmitted}</div><div className="stat-label">Female Leaders Held</div></div>
         <div className="stat-card"><div className="stat-num">{totalAttendance}</div><div className="stat-label">Total Attendance</div></div>
         <div className="stat-card"><div className="stat-num" style={{ color: "var(--blue)" }}>{sum.adults}</div><div className="stat-label">Adults</div></div>
         <div className="stat-card"><div className="stat-num" style={{ color: "var(--blue)" }}>{sum.children}</div><div className="stat-label">Children</div></div>
         <div className="stat-card"><div className="stat-num" style={{ color: "var(--green)" }}>{sum.mvps}</div><div className="stat-label">MVPs Present</div></div>
+        <div className="stat-card"><div className="stat-num" style={{ color: "var(--green)" }}>{sum.cellMvp}</div><div className="stat-label">Cell MVPs</div></div>
+        <div className="stat-card"><div className="stat-num" style={{ color: "var(--green)" }}>{sum.soulsWon}</div><div className="stat-label">Souls Won</div></div>
+        <div className="stat-card"><div className="stat-num">{sum.soulsVisited}</div><div className="stat-label">Souls Visited</div></div>
+        <div className="stat-card"><div className="stat-num">{sum.dca}</div><div className="stat-label">On DCA</div></div>
+        <div className="stat-card"><div className="stat-num">{sum.dli}</div><div className="stat-label">On DLI</div></div>
         <div className="stat-card"><div className="stat-num">{fmt(sum.offering)}</div><div className="stat-label">Total Offering</div></div>
         <div className="stat-card"><div className="stat-num" style={{ color: owing > 0 ? "var(--red)" : "var(--green)" }}>{fmt(owing)}</div><div className="stat-label">Yet to Remit</div></div>
-        <div className="stat-card"><div className="stat-num">{sum.dca} · {sum.dli}</div><div className="stat-label">On DCA · DLI</div></div>
       </div>
 
       {/* NOT SUBMITTED — follow-up list */}
@@ -1826,7 +1859,7 @@ function WeeklyReports({ db, refreshDB }) {
             <div key={l.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "var(--navy)" }}>{l.name}</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>📞 {l.phone} · {l.zone || "—"}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>📞 {l.phone} · 📍 {leaderHood(l)}</div>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
                 <a className="btn-wa" href={waLink(l.phone, `Hello ${l.name.split(" ")[0]}, please remember to submit your cell report for this week on the DC Connect app: ${CHURCH.appUrl} 🙏`)} target="_blank" rel="noreferrer" style={{ fontSize: 11, padding: "6px 10px" }}>💬 Remind</a>
@@ -1843,8 +1876,8 @@ function WeeklyReports({ db, refreshDB }) {
         <div key={r.id} style={{ marginBottom: 10 }}>
           <div className="newcomer-row" style={{ cursor: "pointer", marginBottom: 0 }} onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
             <div style={{ flex: 1 }}>
-              <div className="newcomer-name">{r.leader_name}</div>
-              <div className="newcomer-meta">📖 {r.topic} · 📅 {r.report_date}</div>
+              <div className="newcomer-name">{r.leader_name} {leaderOf(r).gender && <span style={{ fontSize: 11, color: leaderOf(r).gender === "Female" ? "#db2777" : "var(--blue)" }}>· {leaderOf(r).gender}</span>}</div>
+              <div className="newcomer-meta">📖 {r.topic} · 📅 {r.report_date} · 📍 {leaderNeighbourhood(leaderOf(r))}</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                 <span className="info-badge">👥 <span>{(Number(r.adults) || 0) + (Number(r.children) || 0)}</span></span>
                 <span className="info-badge">⭐ <span>{(r.mvps_present_names || []).length}</span></span>
@@ -1856,11 +1889,11 @@ function WeeklyReports({ db, refreshDB }) {
           </div>
           {expanded === r.id && (
             <div style={{ background: "var(--blue-soft)", border: "1px solid #d4e2fb", borderTop: "none", borderRadius: "0 0 12px 12px", padding: "14px 16px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-                {[["Adults", r.adults], ["Children", r.children], ["On DCA", r.dca], ["On DLI", r.dli]].map(([k, v]) => (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
+                {[["Adults", r.adults], ["Children", r.children], ["Cell MVP", r.cell_mvp], ["Souls Won", r.souls_won], ["Souls Visited", r.souls_visited], ["On DCA", r.dca], ["On DLI", r.dli], ["MVPs Present", (r.mvps_present_names || []).length], ["Offering", fmt(r.offering)]].map(([k, v]) => (
                   <div key={k} style={{ background: "#fff", borderRadius: 8, padding: "8px 12px" }}>
                     <div style={{ fontSize: 10, color: "var(--text-dim)", textTransform: "uppercase" }}>{k}</div>
-                    <div style={{ fontSize: 14, color: "var(--navy)", fontWeight: 600 }}>{v || 0}</div>
+                    <div style={{ fontSize: 14, color: "var(--navy)", fontWeight: 600 }}>{v != null ? v : 0}</div>
                   </div>
                 ))}
               </div>
@@ -1888,6 +1921,88 @@ function WeeklyReports({ db, refreshDB }) {
           )}
         </div>
       ))}
+
+      {/* ============================================================
+          PRINT-ONLY FULL REPORT
+          Always contains every leader's complete data so the cell
+          admin never has to expand/unhide anything before printing.
+          Hidden on screen, shown only when printing (see print CSS).
+          ============================================================ */}
+      <div className="print-only-report">
+        <div className="print-header">
+          <h1>{CHURCH.name} {CHURCH.branch}</h1>
+          <h2>Weekly Home Cell Report</h2>
+          <p>Week of {new Date(week).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</p>
+        </div>
+
+        <table className="print-summary-table">
+          <tbody>
+            <tr><td>Reports Submitted</td><td>{weekReports.length} of {leaders.length}</td><td>Male / Female Leaders Held</td><td>{maleSubmitted} / {femaleSubmitted}</td></tr>
+            <tr><td>Total Attendance</td><td>{totalAttendance} ({sum.adults} adults, {sum.children} children)</td><td>MVPs Present</td><td>{sum.mvps}</td></tr>
+            <tr><td>Cell MVPs</td><td>{sum.cellMvp}</td><td>Souls Won / Visited</td><td>{sum.soulsWon} / {sum.soulsVisited}</td></tr>
+            <tr><td>On DCA / DLI</td><td>{sum.dca} / {sum.dli}</td><td>Total Offering</td><td>{fmt(sum.offering)}</td></tr>
+            <tr><td>Remitted</td><td>{fmt(sum.remitted)}</td><td>Yet to Remit</td><td>{fmt(owing)}</td></tr>
+          </tbody>
+        </table>
+
+        <table className="print-detail-table">
+          <thead>
+            <tr>
+              <th>Leader</th><th>Gender</th><th>Neighbourhood</th><th>Topic</th><th>Date</th>
+              <th>Adt</th><th>Chd</th><th>Tot</th><th>MVP Pres.</th><th>Cell MVP</th>
+              <th>Won</th><th>Vis.</th><th>DCA</th><th>DLI</th><th>Offering</th><th>Remit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {weekReports.map((r) => {
+              const l = leaderOf(r);
+              return (
+                <tr key={r.id}>
+                  <td>{r.leader_name}</td>
+                  <td>{l.gender || "—"}</td>
+                  <td>{leaderNeighbourhood(l)}</td>
+                  <td>{r.topic}</td>
+                  <td>{r.report_date}</td>
+                  <td>{r.adults || 0}</td>
+                  <td>{r.children || 0}</td>
+                  <td>{(Number(r.adults) || 0) + (Number(r.children) || 0)}</td>
+                  <td>{(r.mvps_present_names || []).length}</td>
+                  <td>{r.cell_mvp || 0}</td>
+                  <td>{r.souls_won || 0}</td>
+                  <td>{r.souls_visited || 0}</td>
+                  <td>{r.dca || 0}</td>
+                  <td>{r.dli || 0}</td>
+                  <td>{fmt(r.offering)}</td>
+                  <td>{r.offering_remitted ? "Yes" : "No"}</td>
+                </tr>
+              );
+            })}
+            <tr className="print-total-row">
+              <td colSpan={5}>TOTAL ({weekReports.length} leaders)</td>
+              <td>{sum.adults}</td><td>{sum.children}</td><td>{totalAttendance}</td>
+              <td>{sum.mvps}</td><td>{sum.cellMvp}</td><td>{sum.soulsWon}</td><td>{sum.soulsVisited}</td>
+              <td>{sum.dca}</td><td>{sum.dli}</td><td>{fmt(sum.offering)}</td><td></td>
+            </tr>
+          </tbody>
+        </table>
+
+        {/* MVP names + comments per leader (so nothing is lost in print) */}
+        <div className="print-notes">
+          {weekReports.filter((r) => (r.mvps_present_names || []).length || r.comment).map((r) => (
+            <div key={r.id} className="print-note-block">
+              <strong>{r.leader_name}:</strong>
+              {(r.mvps_present_names || []).length > 0 && <span> MVPs present — {r.mvps_present_names.join(", ")}.</span>}
+              {r.comment && <span> Comment — "{r.comment}".</span>}
+            </div>
+          ))}
+        </div>
+
+        {notSubmitted.length > 0 && (
+          <div className="print-notes">
+            <div className="print-note-block"><strong>Yet to submit ({notSubmitted.length}):</strong> {notSubmitted.map((l) => l.name).join(", ")}.</div>
+          </div>
+        )}
+      </div>
     </>
   );
 }

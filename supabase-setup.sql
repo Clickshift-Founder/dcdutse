@@ -238,3 +238,12 @@ create index if not exists idx_reports_week on cell_reports(week_of);
 alter table cell_reports enable row level security;
 drop policy if exists "anon_all_cell_reports" on cell_reports;
 create policy "anon_all_cell_reports" on cell_reports for all using (true) with check (true);
+
+-- ============================================================
+--  CELL REPORTS — additional fields (souls won/visited, cell MVP)
+--  Run this block if your cell_reports table already exists.
+--  Existing rows default to 0; nothing is lost.
+-- ============================================================
+alter table cell_reports add column if not exists souls_won int default 0;
+alter table cell_reports add column if not exists souls_visited int default 0;
+alter table cell_reports add column if not exists cell_mvp int default 0;

@@ -239,8 +239,36 @@ code { background: #eef2f8; padding: 2px 6px; border-radius: 5px; color: var(--n
 }
 @media (min-width: 641px) { .mobile-tabs { display: none; } }
 
+/* The print-only report is hidden on screen */
+.print-only-report { display: none; }
+
 @media print {
-  .top-nav, .mobile-tabs, .tab-bar, .btn-primary, .btn-secondary { display: none !important; }
+  /* Hide all the interactive/screen UI */
+  .top-nav, .mobile-tabs, .tab-bar, .btn-primary, .btn-secondary, .btn-wa, .btn-danger,
+  .notice, .stat-grid, .form-group, .newcomer-row, .form-section-title { display: none !important; }
   body { background: #fff; }
-  .form-card, .stat-card, .newcomer-row { box-shadow: none; border: 1px solid #ccc; }
+
+  /* Show ONLY the dedicated print report, fully expanded */
+  .print-only-report { display: block !important; color: #000; }
+
+  .print-header { text-align: center; margin-bottom: 16px; }
+  .print-header h1 { font-size: 18px; color: #0b115b; margin: 0; font-family: Georgia, serif; }
+  .print-header h2 { font-size: 14px; margin: 4px 0; font-weight: 600; }
+  .print-header p { font-size: 12px; color: #444; margin: 0; }
+
+  .print-summary-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 11px; }
+  .print-summary-table td { border: 1px solid #999; padding: 5px 8px; }
+  .print-summary-table td:nth-child(odd) { background: #eff4ff; font-weight: 600; width: 22%; }
+
+  .print-detail-table { width: 100%; border-collapse: collapse; font-size: 9px; margin-bottom: 14px; }
+  .print-detail-table th { background: #0b115b; color: #fff; padding: 4px 3px; border: 1px solid #0b115b; text-align: left; }
+  .print-detail-table td { border: 1px solid #aaa; padding: 3px; }
+  .print-detail-table tr:nth-child(even) td { background: #f4f7fc; }
+  .print-total-row td { background: #dde7fb !important; font-weight: 700; }
+
+  .print-notes { font-size: 10px; margin-bottom: 10px; }
+  .print-note-block { margin-bottom: 4px; line-height: 1.4; }
+
+  /* Landscape gives the wide table room */
+  @page { size: landscape; margin: 1cm; }
 }

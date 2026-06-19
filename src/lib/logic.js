@@ -143,9 +143,13 @@ export function generateInsights() {
   ncs.forEach((n) => (n.prayerPoints || []).forEach((p) => (prayerFreq[p] = (prayerFreq[p] || 0) + 1)));
   const topPrayers = Object.entries(prayerFreq).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
-  // Area distribution (where are people coming from?)
+  // Neighbourhood distribution (where are people coming from?)
+  // Tracking happens at neighbourhood level since the church is in Dutse Main.
   const areaCounts = {};
-  ncs.forEach((n) => (areaCounts[n.area] = (areaCounts[n.area] || 0) + 1));
+  ncs.forEach((n) => {
+    const place = n.sublocation || n.area || "Unknown";
+    areaCounts[place] = (areaCounts[place] || 0) + 1;
+  });
   const topAreas = Object.entries(areaCounts).sort((a, b) => b[1] - a[1]);
 
   // Conversion rate (new -> member)

@@ -275,7 +275,7 @@ function CellReportView({ leader, db, mine, refreshDB }) {
   const blank = {
     report_date: new Date().toISOString().split("T")[0],
     topic: "", adults: 0, children: 0,
-    mvps: [], offering: 0, dca: 0, dli: 0, comment: "",
+    mvps: [], offering: 0, dca: 0, dli: 0, soulsWon: 0, soulsVisited: 0, cellMvp: 0, comment: "",
   };
   const [f, setF] = useState(blank);
   const [done, setDone] = useState(false);
@@ -298,6 +298,8 @@ function CellReportView({ leader, db, mine, refreshDB }) {
       mvps_present: f.mvps, mvps_present_names: mvpNames,
       offering: Number(f.offering) || 0,
       dca: Number(f.dca) || 0, dli: Number(f.dli) || 0,
+      souls_won: Number(f.soulsWon) || 0, souls_visited: Number(f.soulsVisited) || 0,
+      cell_mvp: Number(f.cellMvp) || 0,
       comment: f.comment, offering_remitted: false,
     };
     await submitReport(report);
@@ -383,6 +385,20 @@ function CellReportView({ leader, db, mine, refreshDB }) {
               </div>
             </div>
 
+            <div className="form-grid-2" style={{ marginTop: 14 }}>
+              <div className="form-group">
+                <label className="form-label">Souls Won / Souls Visited</label>
+                <div className="form-grid-2">
+                  <input type="number" min="0" className="form-input" placeholder="Won" value={f.soulsWon} onChange={(e) => setF((x) => ({ ...x, soulsWon: e.target.value }))} />
+                  <input type="number" min="0" className="form-input" placeholder="Visited" value={f.soulsVisited} onChange={(e) => setF((x) => ({ ...x, soulsVisited: e.target.value }))} />
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Cell MVP <span style={{ textTransform: "none", color: "var(--text-dim)" }}>(new members in your cell)</span></label>
+                <input type="number" min="0" className="form-input" placeholder="0" value={f.cellMvp} onChange={(e) => setF((x) => ({ ...x, cellMvp: e.target.value }))} />
+              </div>
+            </div>
+
             <div className="form-group" style={{ marginTop: 14 }}>
               <label className="form-label">Comments / Challenges / Testimonies (optional)</label>
               <textarea className="form-input" rows={3} value={f.comment} onChange={(e) => setF((x) => ({ ...x, comment: e.target.value }))} style={{ resize: "vertical" }} />
@@ -410,6 +426,8 @@ function CellReportView({ leader, db, mine, refreshDB }) {
                 <span className="info-badge">⭐ <span>{(r.mvps_present_names || []).length}</span> MVPs</span>
                 <span className="info-badge">💰 <span>{fmt(r.offering)}</span></span>
                 <span className="info-badge">DCA <span>{r.dca || 0}</span> · DLI <span>{r.dli || 0}</span></span>
+                <span className="info-badge">Won <span>{r.souls_won || 0}</span> · Visited <span>{r.souls_visited || 0}</span></span>
+                <span className="info-badge">Cell MVP <span>{r.cell_mvp || 0}</span></span>
               </div>
               {r.comment && <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8, fontStyle: "italic" }}>"{r.comment}"</div>}
             </div>
