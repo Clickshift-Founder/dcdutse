@@ -60,11 +60,11 @@ export default function CellLeaderPage({ db, refreshDB, auth, setAuth }) {
   // (CSV-imported leaders get a cloud UUID that differs from their local id).
   const sameLeader = (nc) => {
     const al = nc.assignedLeader;
-    if (!al) return false;
-    if (al.id && leader.id && al.id === leader.id) return true;
-    const np = (al.phone || "").replace(/\D/g, "").slice(-10);
     const lp = (leader.phone || "").replace(/\D/g, "").slice(-10);
-    return np && lp && np === lp;
+    if (al?.id && leader.id && al.id === leader.id) return true;
+    // match by the leader phone on the snapshot OR stored on the newcomer row
+    const snapPhone = (al?.phone || nc.assignedLeaderPhone || "").replace(/\D/g, "").slice(-10);
+    return lp && snapPhone && lp === snapPhone;
   };
   const mine = (db.newcomers || []).filter(sameLeader);
   const pending = mine.filter((nc) => nc.status === "new");

@@ -74,7 +74,18 @@ export default function NewcomerPage({ refreshDB, isOnline }) {
         ...record,
         roles: ["newcomer"],
         assignedLeaderId: leader?.id || null,
-      }).then(() => refreshDB());
+      })
+        .then(() => refreshDB())
+        .catch((err) => {
+          // Don't fail silently — tell the user the cloud save didn't go through
+          alert(
+            "⚠️ This person was saved on THIS device but could NOT be saved to the shared database.\n\n" +
+            "They may not appear on other devices or in the cell leader's portal until this is fixed.\n\n" +
+            "Error: " + (err?.message || "unknown") +
+            "\n\nPlease screenshot this and send to your admin."
+          );
+          refreshDB();
+        });
     } else {
       refreshDB();
     }

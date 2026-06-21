@@ -148,20 +148,24 @@ export async function pullFromCloud() {
     const prevById = {};
     (db.newcomers || []).forEach((n) => { if (n.id) prevById[n.id] = n; });
     const findLeaderFor = (p) => {
-      // 1) by stored leader id
+      // 1) by stored leader id (valid UUID match)
       if (p.assignedLeaderId) {
         const byId = leaders.find((l) => l.id === p.assignedLeaderId);
         if (byId) return byId;
       }
-      // 2) fall back to a previous local snapshot's phone (survives id changes)
-      const prev = prevById[p.id];
-      const prevPhone = prev?.assignedLeader?.phone;
-      if (prevPhone) {
-        const lp = prevPhone.replace(/\D/g, "").slice(-10);
-        const byPhone = leaders.find((l) => (l.phone || "").replace(/\D/g, "").slice(-10) === lp);
+      // 2) by the leader phone stored ON the newcomer row (most reliable —
+      //    survives any id changes from CSV import / re-sync)
+      const storedPhone = p.assignedLeaderPhone;
+      if (storedPhone) {
+        const sp = storedPhone.replace(/\D/g, "").slice(-10);
+        const byPhone = leaders.find((l) => (l.phone || "").replace(/\D/g, "").slice(-10) === sp);
         if (byPhone) return byPhone;
-        if (prev.assignedLeader) return prev.assignedLeader; // keep old snapshot
+        // leader not in list yet — keep a minimal snapshot so it still shows
+        return { id: p.assignedLeaderId || null, name: p.assignedLeaderName || "Assigned leader", phone: storedPhone };
       }
+      // 3) fall back to a previous local snapshot
+      const prev = prevById[p.id];
+      if (prev?.assignedLeader) return prev.assignedLeader;
       return null;
     };
     const newcomers = people
@@ -187,8 +191,16 @@ export async function pullFromCloud() {
 
 export async function pushPersonToCloud(person) {
   if (!supabaseEnabled) return person;
-  try { return await sbInsertPerson(person); }
-  catch (e) { console.error("Cloud insert failed", e); return person; }
+  try {
+    return await sbInsertPerson(person);
+  } catch (e) {
+    console.error("Cloud insert failed", e);
+    // Surface the failure so it isn't silent — the caller can alert the user.
+    if (typeof window !== "undefined") {
+      window.__lastCloudError = e?.message || String(e);
+    }
+    throw e;
+  }
 }
 
 export async function updatePersonInCloud(id, patch) {

@@ -247,3 +247,14 @@ create policy "anon_all_cell_reports" on cell_reports for all using (true) with 
 alter table cell_reports add column if not exists souls_won int default 0;
 alter table cell_reports add column if not exists souls_visited int default 0;
 alter table cell_reports add column if not exists cell_mvp int default 0;
+
+-- ============================================================
+--  FIX: newcomer inserts were failing silently. Run this block.
+--  1) birthday stored as TEXT (supports year-less "MM-DD")
+--  2) add assigned_leader_name / assigned_leader_phone so the
+--     cell portal can always match a soul to its leader by phone
+--     (a generated/local leader id is NOT a valid uuid).
+-- ============================================================
+alter table people alter column birthday type text using birthday::text;
+alter table people add column if not exists assigned_leader_name text;
+alter table people add column if not exists assigned_leader_phone text;

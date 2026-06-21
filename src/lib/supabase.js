@@ -39,6 +39,8 @@ export function rowToPerson(r) {
     prayerPoints: r.prayer_points || [], customPrayer: r.custom_prayer,
     departments: r.departments || [], deptAssigned: r.dept_assigned,
     assignedLeaderId: r.assigned_leader_id,
+    assignedLeaderName: r.assigned_leader_name,
+    assignedLeaderPhone: r.assigned_leader_phone,
     attendance: (r.attendance || []).map((d) => (typeof d === "string" ? d : d)),
     contactedAt: r.contacted_at, whatsappAdded: r.whatsapp_added,
     zone: r.zone, coverage: r.coverage || [], canLogin: r.can_login, deptId: r.dept_id,
@@ -50,6 +52,11 @@ export function rowToPerson(r) {
 // Map an app person -> DB columns
 export function personToRow(p, churchId) {
   const yn = (v) => (v === "yes" ? true : v === "no" ? false : null);
+  // assigned_leader_id is a uuid column. Only pass a value if it's a real UUID;
+  // a local/generated id (e.g. "cl_csv_123") would crash the insert.
+  const rawLeaderId = p.assignedLeaderId || p.assignedLeader?.id || null;
+  const isUuid = (v) => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+  const leaderId = isUuid(rawLeaderId) ? rawLeaderId : null;
   return {
     church_id: churchId,
     name: p.name, phone: p.phone, email: p.email || null,
@@ -57,10 +64,13 @@ export function personToRow(p, churchId) {
     area: p.area, sublocation: p.sublocation, village: p.village, street: p.street,
     born_again: yn(p.bornAgain), baptized_hg: yn(p.baptizedHG), baptized_water: yn(p.baptizedWater),
     how_came: p.howCame, inviter_name: p.inviterName, mission: p.mission,
-    gender: p.gender, marital: p.marital, birthday: p.birthday || null,
+    gender: p.gender, marital: p.marital,
+    birthday: p.birthday || null,                 // stored as text (see SQL migration)
     prayer_points: p.prayerPoints || [], custom_prayer: p.customPrayer,
     departments: p.departments || [], dept_assigned: p.deptAssigned || null,
-    assigned_leader_id: p.assignedLeaderId || p.assignedLeader?.id || null,
+    assigned_leader_id: leaderId,
+    assigned_leader_name: p.assignedLeader?.name || null,
+    assigned_leader_phone: p.assignedLeader?.phone || null,
     attendance: p.attendance || [],
     contacted_at: p.contactedAt || null, whatsapp_added: !!p.whatsappAdded,
     zone: p.zone, coverage: p.coverage || [], can_login: !!p.canLogin, dept_id: p.deptId || null,
