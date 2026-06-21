@@ -56,7 +56,17 @@ export default function CellLeaderPage({ db, refreshDB, auth, setAuth }) {
     );
   }
 
-  const mine = (db.newcomers || []).filter((nc) => nc.assignedLeader?.id === leader.id);
+  // Match by id OR phone — phone is the stable key that survives cloud sync
+  // (CSV-imported leaders get a cloud UUID that differs from their local id).
+  const sameLeader = (nc) => {
+    const al = nc.assignedLeader;
+    if (!al) return false;
+    if (al.id && leader.id && al.id === leader.id) return true;
+    const np = (al.phone || "").replace(/\D/g, "").slice(-10);
+    const lp = (leader.phone || "").replace(/\D/g, "").slice(-10);
+    return np && lp && np === lp;
+  };
+  const mine = (db.newcomers || []).filter(sameLeader);
   const pending = mine.filter((nc) => nc.status === "new");
   const active = mine.filter((nc) => nc.status === "active");
   const members = mine.filter((nc) => nc.status === "member");

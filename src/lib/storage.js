@@ -145,12 +145,28 @@ export async function pullFromCloud() {
       canLogin: p.canLogin,
     }));
     // Newcomers/members = everyone else (or those with newcomer/member role)
+    const prevById = {};
+    (db.newcomers || []).forEach((n) => { if (n.id) prevById[n.id] = n; });
+    const findLeaderFor = (p) => {
+      // 1) by stored leader id
+      if (p.assignedLeaderId) {
+        const byId = leaders.find((l) => l.id === p.assignedLeaderId);
+        if (byId) return byId;
+      }
+      // 2) fall back to a previous local snapshot's phone (survives id changes)
+      const prev = prevById[p.id];
+      const prevPhone = prev?.assignedLeader?.phone;
+      if (prevPhone) {
+        const lp = prevPhone.replace(/\D/g, "").slice(-10);
+        const byPhone = leaders.find((l) => (l.phone || "").replace(/\D/g, "").slice(-10) === lp);
+        if (byPhone) return byPhone;
+        if (prev.assignedLeader) return prev.assignedLeader; // keep old snapshot
+      }
+      return null;
+    };
     const newcomers = people
       .filter((p) => !(p.roles || []).includes("cellLeader") || (p.roles || []).includes("newcomer") || (p.roles || []).includes("member"))
-      .map((p) => ({
-        ...p,
-        assignedLeader: p.assignedLeaderId ? leaders.find((l) => l.id === p.assignedLeaderId) || null : null,
-      }));
+      .map((p) => ({ ...p, assignedLeader: findLeaderFor(p) }));
     // leadership = pastors, HODs, etc.
     const leadership = people.filter((p) =>
       (p.roles || []).some((r) => ["pastor", "zonalPastor", "deptHead"].includes(r))

@@ -243,32 +243,48 @@ code { background: #eef2f8; padding: 2px 6px; border-radius: 5px; color: var(--n
 .print-only-report { display: none; }
 
 @media print {
-  /* Hide all the interactive/screen UI */
-  .top-nav, .mobile-tabs, .tab-bar, .btn-primary, .btn-secondary, .btn-wa, .btn-danger,
-  .notice, .stat-grid, .form-group, .newcomer-row, .form-section-title { display: none !important; }
+  /* ============ MODE 1: PRINT TABLE (compact full table) ============ */
+  body.printing-table .top-nav, body.printing-table .mobile-tabs, body.printing-table .tab-bar,
+  body.printing-table .btn-primary, body.printing-table .btn-secondary, body.printing-table .btn-wa,
+  body.printing-table .btn-danger, body.printing-table .notice, body.printing-table .stat-grid,
+  body.printing-table .form-group, body.printing-table .newcomer-row, body.printing-table .form-section-title {
+    display: none !important;
+  }
+  body.printing-table .print-only-report { display: block !important; color: #000; }
+
+  /* ============ MODE 2: PRINT PAGE (screen as it appears) ============ */
+  /* Hide only chrome + the dedicated table; keep summary cards & rows visible */
+  body.printing-page .top-nav, body.printing-page .mobile-tabs, body.printing-page .tab-bar,
+  body.printing-page .btn-primary, body.printing-page .btn-secondary, body.printing-page .btn-wa,
+  body.printing-page .btn-danger, body.printing-page .print-only-report {
+    display: none !important;
+  }
+  body.printing-page .newcomer-row { break-inside: avoid; }
+  body.printing-page .stat-card, body.printing-page .form-card, body.printing-page .newcomer-row {
+    box-shadow: none !important; border: 1px solid #ccc !important;
+  }
+  body.printing-page .notice { border: 1px solid #d4e2fb; }
+
   body { background: #fff; }
 
-  /* Show ONLY the dedicated print report, fully expanded */
-  .print-only-report { display: block !important; color: #000; }
+  /* Shared print-table styling */
+  .print-header { text-align: center; margin-bottom: 14px; }
+  .print-header h1 { font-size: 17px; color: #0b115b; margin: 0; font-family: Georgia, serif; }
+  .print-header h2 { font-size: 13px; margin: 4px 0; font-weight: 600; }
+  .print-header p { font-size: 11px; color: #444; margin: 0; }
 
-  .print-header { text-align: center; margin-bottom: 16px; }
-  .print-header h1 { font-size: 18px; color: #0b115b; margin: 0; font-family: Georgia, serif; }
-  .print-header h2 { font-size: 14px; margin: 4px 0; font-weight: 600; }
-  .print-header p { font-size: 12px; color: #444; margin: 0; }
-
-  .print-summary-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 11px; }
+  .print-summary-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 11px; }
   .print-summary-table td { border: 1px solid #999; padding: 5px 8px; }
   .print-summary-table td:nth-child(odd) { background: #eff4ff; font-weight: 600; width: 22%; }
 
-  .print-detail-table { width: 100%; border-collapse: collapse; font-size: 9px; margin-bottom: 14px; }
-  .print-detail-table th { background: #0b115b; color: #fff; padding: 4px 3px; border: 1px solid #0b115b; text-align: left; }
-  .print-detail-table td { border: 1px solid #aaa; padding: 3px; }
+  .print-detail-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 14px; table-layout: fixed; }
+  .print-detail-table th { background: #0b115b; color: #fff; padding: 5px 4px; border: 1px solid #0b115b; text-align: left; font-size: 10px; }
+  .print-detail-table td { border: 1px solid #aaa; padding: 4px; word-wrap: break-word; }
   .print-detail-table tr:nth-child(even) td { background: #f4f7fc; }
   .print-total-row td { background: #dde7fb !important; font-weight: 700; }
 
   .print-notes { font-size: 10px; margin-bottom: 10px; }
   .print-note-block { margin-bottom: 4px; line-height: 1.4; }
 
-  /* Landscape gives the wide table room */
   @page { size: landscape; margin: 1cm; }
 }

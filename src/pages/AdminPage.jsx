@@ -1784,6 +1784,18 @@ function WeeklyReports({ db, refreshDB }) {
     refreshDB();
   };
 
+  // Two print modes:
+  //  - "table": the compact full table (print-only-report). Best for the pastor's records.
+  //  - "page":  the screen as it appears (summary cards + leader rows), no detail tables.
+  const printAs = (mode) => {
+    document.body.classList.remove("printing-table", "printing-page");
+    document.body.classList.add(mode === "table" ? "printing-table" : "printing-page");
+    setTimeout(() => {
+      window.print();
+      setTimeout(() => document.body.classList.remove("printing-table", "printing-page"), 500);
+    }, 50);
+  };
+
   const exportWeek = () => {
     const headers = ["Leader", "Gender", "Neighbourhood", "Date Held", "Topic", "Adults", "Children", "Total", "MVPs Present (names)", "MVPs Count", "Cell MVP", "Souls Won", "Souls Visited", "On DCA", "On DLI", "Offering", "Remitted", "Comment"];
     const rows = weekReports.map((r) => {
@@ -1825,7 +1837,8 @@ function WeeklyReports({ db, refreshDB }) {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn-secondary" onClick={exportWeek}>⬇️ Export Week (CSV)</button>
-          <button className="btn-secondary" onClick={() => window.print()}>🖨️ Print</button>
+          <button className="btn-secondary" onClick={() => printAs("table")}>🖨️ Print Table</button>
+          <button className="btn-secondary" onClick={() => printAs("page")}>🖨️ Print Page</button>
         </div>
       </div>
 
@@ -1948,9 +1961,9 @@ function WeeklyReports({ db, refreshDB }) {
         <table className="print-detail-table">
           <thead>
             <tr>
-              <th>Leader</th><th>Gender</th><th>Neighbourhood</th><th>Topic</th><th>Date</th>
-              <th>Adt</th><th>Chd</th><th>Tot</th><th>MVP Pres.</th><th>Cell MVP</th>
-              <th>Won</th><th>Vis.</th><th>DCA</th><th>DLI</th><th>Offering</th><th>Remit</th>
+              <th>Leader</th><th>G</th><th>Neighbourhood</th><th>Topic</th>
+              <th>Adt</th><th>Chd</th><th>Tot</th><th>MVP</th><th>CMVP</th>
+              <th>Won</th><th>Vis</th><th>DCA</th><th>DLI</th><th>Offering</th><th>Rem</th>
             </tr>
           </thead>
           <tbody>
@@ -1959,10 +1972,9 @@ function WeeklyReports({ db, refreshDB }) {
               return (
                 <tr key={r.id}>
                   <td>{r.leader_name}</td>
-                  <td>{l.gender || "—"}</td>
+                  <td>{(l.gender || "").charAt(0).toUpperCase() || "—"}</td>
                   <td>{leaderNeighbourhood(l)}</td>
                   <td>{r.topic}</td>
-                  <td>{r.report_date}</td>
                   <td>{r.adults || 0}</td>
                   <td>{r.children || 0}</td>
                   <td>{(Number(r.adults) || 0) + (Number(r.children) || 0)}</td>
@@ -1973,12 +1985,12 @@ function WeeklyReports({ db, refreshDB }) {
                   <td>{r.dca || 0}</td>
                   <td>{r.dli || 0}</td>
                   <td>{fmt(r.offering)}</td>
-                  <td>{r.offering_remitted ? "Yes" : "No"}</td>
+                  <td>{r.offering_remitted ? "Y" : "N"}</td>
                 </tr>
               );
             })}
             <tr className="print-total-row">
-              <td colSpan={5}>TOTAL ({weekReports.length} leaders)</td>
+              <td colSpan={4}>TOTAL ({weekReports.length} leaders)</td>
               <td>{sum.adults}</td><td>{sum.children}</td><td>{totalAttendance}</td>
               <td>{sum.mvps}</td><td>{sum.cellMvp}</td><td>{sum.soulsWon}</td><td>{sum.soulsVisited}</td>
               <td>{sum.dca}</td><td>{sum.dli}</td><td>{fmt(sum.offering)}</td><td></td>
